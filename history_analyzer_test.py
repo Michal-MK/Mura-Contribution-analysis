@@ -1,12 +1,17 @@
 import unittest
+from math import isclose
+from typing import List
 
 import git
 
-from history_analyzer import compute_path, get_file_changes, analyze
+import lib
+from history_analyzer import compute_path, get_file_changes, analyze, AuthorName, calculate_percentage
 
 TEST_REPO = "C:\\Repositories\\TurtleGraphics"
 TEST_REPO2 = ".\\repositories\\single_file"
 
+def by(section: List[AuthorName], author: AuthorName):
+    return all(filter(lambda x: x == author, section))
 
 def compute_path_t():
     start_hash = 'cdce762b1f46fc20c1e15c27c7874925ff830ab4'
@@ -28,21 +33,75 @@ def get_ownership_t():
     ownership = get_file_changes(c_hash, repo)
 
     assert len(ownership['NasModel.cs'].hunks) == 3
-    assert ownership['NasModel.cs'].hunks[0][2] == 40
-    assert ownership['NasModel.cs'].hunks[0][3] == 0
-    assert ownership['NasModel.cs'].hunks[1][2] == 51
-    assert ownership['NasModel.cs'].hunks[1][3] == 0
-    assert ownership['NasModel.cs'].hunks[2][2] == 75
-    assert ownership['NasModel.cs'].hunks[2][3] == 0
+    assert ownership['NasModel.cs'].hunks[0].change_start == 40
+    assert ownership['NasModel.cs'].hunks[0].change_len == 1
+    assert ownership['NasModel.cs'].hunks[1].change_start == 51
+    assert ownership['NasModel.cs'].hunks[1].change_len == 1
+    assert ownership['NasModel.cs'].hunks[2].change_start == 75
+    assert ownership['NasModel.cs'].hunks[2].change_len == 1
 
 
-def analyze_t():
+def analyze_t1():
     repo = git.Repo(TEST_REPO2)
+    lib.set_repo(repo)
+    lib.try_checkout('e4b73d4152c5e9e6c854fbf1df99011bf16e3eb9', True)
     result = analyze('HEAD', 'ROOT', repo)
-    print(result)
+    assert result['NasModel.cs'].line_count == 75
+    assert result['NasModel.cs'].changes[0] == ''
+    assert len(list(filter(lambda x: x == 'Michal-MK', result['NasModel.cs'].changes))) == result[
+        'NasModel.cs'].line_count
+
+
+def analyze_t2():
+    repo = git.Repo(TEST_REPO2)
+    lib.set_repo(repo)
+    lib.try_checkout('9d5b319e1302d4bfa79b44c639b1c7de82d6a9c7', True)
+    result = analyze('HEAD', 'ROOT', repo)
+    assert result['NasModel.cs'].line_count == 78
+    assert result['NasModel.cs'].changes[0] == ''
+    assert len(list(filter(lambda x: x == 'Michal-MK', result['NasModel.cs'].changes))) == result[
+        'NasModel.cs'].line_count
+
+
+def analyze_t3():
+    repo = git.Repo(TEST_REPO2)
+    lib.set_repo(repo)
+    lib.try_checkout('96192b7ac9b3484a6e647519fb67f0be620f0bd5', True)
+    result = analyze('HEAD', 'ROOT', repo)
+    assert result['NasModel.cs'].line_count == 78
+    assert result['NasModel.cs'].changes[0] == ''
+    assert len(list(filter(lambda x: x == 'Michal-MK', result['NasModel.cs'].changes))) == result[
+        'NasModel.cs'].line_count
+
+
+def analyze_t4():
+    repo = git.Repo(TEST_REPO2)
+    lib.set_repo(repo)
+    lib.try_checkout('aa1b0d3dd95ffcbbd0827f147a912888a5ced8bd', True)
+    result = analyze('HEAD', 'ROOT', repo)
+    assert result['NasModel.cs'].line_count == 85
+    assert result['NasModel.cs'].changes[0] == ''
+    assert by(result['NasModel.cs'].changes[1:75], "Michal-MK")
+    assert by(result['NasModel.cs'].changes[76:76 + 7], "Other Name")
+    assert by(result['NasModel.cs'].changes[83:85], "Michal-MK")
+
+def percentage_t():
+    repo = git.Repo(TEST_REPO2)
+    lib.set_repo(repo)
+    lib.try_checkout('aa1b0d3dd95ffcbbd0827f147a912888a5ced8bd', True)
+    result = analyze('HEAD', 'ROOT', repo)
+
+    res = calculate_percentage(result)
+
+    assert isclose(res[1]['Michal-MK'], 78 / 85)
+    assert isclose(res[1]['Other Name'], 7 / 85)
 
 
 if __name__ == '__main__':
     compute_path_t()
     get_ownership_t()
-    analyze_t()
+    analyze_t1()
+    analyze_t2()
+    analyze_t3()
+    analyze_t4()
+    percentage_t()

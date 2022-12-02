@@ -1,8 +1,7 @@
+import os
 from typing import Union, List, Optional, Literal
 
 from git import Repo, Commit
-
-from history_analyzer import FileSection
 
 REPO: Repo
 
@@ -58,27 +57,11 @@ def get_files_with_flag(commit: Commit, flag: Literal["A", "R", "D", "M"]) -> Li
             files.append(diff.b_path)
     return files
 
-def try_checkout(commit_hash: str) -> None:
+def try_checkout(commit_hash: str, force: bool = False) -> None:
     try:
-        REPO.git.checkout(commit_hash)
-    except:
-        print(f"Failed to checkout {commit_hash} - Are there any uncommitted changes?")
+        REPO.git.checkout(commit_hash, force=force)
+    except Exception as e:
+        print(f"Failed to checkout {commit_hash} {e} - Are there any uncommitted changes?")
 
-
-def overlap(hunk: FileSection, existing_hunk: FileSection):
-    if hunk.mode == "A":
-        return False
-
-    if hunk.change_start <= existing_hunk.change_start <= hunk.change_end:
-        return True
-    if hunk.change_start <= existing_hunk.change_end <= hunk.change_end:
-        return True
-    if existing_hunk.change_start <= hunk.change_start <= existing_hunk.change_end:
-        return True
-    if existing_hunk.change_start <= hunk.change_end <= existing_hunk.change_end:
-        return True
-    return False
-
-
-def contained(point: int, existing: FileSection):
-    return point >= existing.change_start and point <= existing.change_end
+def repo_p(file_name: str, repo: Repo):
+    return os.path.join(repo.common_dir, '..', file_name)
