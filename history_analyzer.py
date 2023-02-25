@@ -3,7 +3,7 @@ import re
 from collections import deque, defaultdict
 from typing import List, Dict, Tuple, Deque, Optional, DefaultDict, Set
 
-from git import Repo, Commit
+from git import Repo
 
 import lib
 
@@ -28,17 +28,14 @@ class CommitRange:
     def compute_path(self) -> Deque[str]:
         """
         Compute the path from <current_commit_hash> to <historical_commit_hash> in the <repo>
-        :param current_commit_hash: The hash of the current commit (usually HEAD)
-        :param historical_commit_hash: The hash of the historical commit (usually the first commit or the staring point)
-        :param repo: The repository to analyze
         :return: A list of commit hashes sorted from <current_commit_hash> to <historical_commit_hash>
         """
         if self.head.lower() == 'head':
             self.head = self.repo.head.commit.hexsha
         if self.hist.lower() == 'root':
             self.hist = lib.first_commit(self.repo.commit(self.head)).hexsha
-        range = f"{self.head}...{self.hist}"
-        output = self.repo.git.execute(["git", "rev-list", "--topo-order", "--ancestry-path", "--reverse", range])
+        c_range = f"{self.head}...{self.hist}"
+        output = self.repo.git.execute(["git", "rev-list", "--topo-order", "--ancestry-path", "--reverse", c_range])
         assert isinstance(output, str)
         ret = deque(output.splitlines())
         ret.insert(0, self.hist)
@@ -48,9 +45,6 @@ class CommitRange:
         """
         Analyze the repository <repo> from the commit with the hash <historical_commit_hash> to the commit with the hash
         <current_commit_hash>
-        :param repo: The repository to analyze
-        :param current_commit_hash: The hash of the current commit (usually HEAD)
-        :param historical_commit_hash: The hash of the historical commit (usually the first commit or the staring point)
         :return:
         """
         path = self.compute_path()
@@ -88,14 +82,13 @@ class CommitRange:
         all_in_range = []
         for commit in all_commits:
             c = self.repo.commit(commit)
-            if c.committed_date  <= head_date and  c.committed_date >= hist_date:
+            if c.committed_date <= head_date and c.committed_date >= hist_date:
                 all_in_range.append(commit)
 
         all_set = set(all_in_range)
         unmerged_commits = all_set.difference(main_path)
 
         tree = construct_unmerged_tree(unmerged_commits, all_set, self.repo)
-
 
         visited = set()
         for parent, children in filter(lambda x: x[1], tree.items()):
@@ -111,9 +104,6 @@ class CommitRange:
             path = create_path(parent, tree, self.repo, [])
             path.insert(0, parent)
             print(path)
-
-
-
 
 
 class FileSection:
@@ -216,11 +206,13 @@ def calculate_percentage(result: AnalysisResult) -> Tuple[Dict[str, List[Tuple[s
 
     return ret, totals
 
+
 def construct_unmerged_tree(unmerged_commits: Set[str], all_commits: Set[str], repo: Repo) -> Dict[str, List[str]]:
     """
     Construct a tree of all unmerged commits
     :param unmerged_commits: A set of all unmerged commits
     :param all_commits: A list of all commits in the repository
+    :param repo: The repository to analyze
     :return: A dictionary mapping each commit to a list of its children
     """
     ret: Dict[str, List[str]] = {}
@@ -243,6 +235,7 @@ def construct_unmerged_tree(unmerged_commits: Set[str], all_commits: Set[str], r
                     if parent.hexsha in unmerged_commits:
                         q.append(parent.hexsha)
     return ret
+
 
 def create_path(parent: str, tree: Dict[str, List[str]], repo: Repo, paths: List[str]) -> List[str]:
     ret: List[str] = []

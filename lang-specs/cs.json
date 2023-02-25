@@ -1,0 +1,12 @@
+{
+  "block_class_construct": {
+    "start_identifier": "[|public|private|protected|internal] [class|record] \\w+;?\\s*{",
+    "end_identifier": "}"
+  },
+  "block_function_construct": {
+
+  },
+  "variable_construct": {
+
+  }
+}

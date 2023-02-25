@@ -1,0 +1,24 @@
+[
+  {
+    "type": "Literal",
+    "value": "{",
+    "weight": 0,
+    "exactness": 0
+  },
+  {
+    "type": "Literal",
+    "value": "}",
+    "weight": 0,
+    "exactness": 0
+  },
+  {
+    "type": "Regex",
+    "value": "^namespace.*{\\s*$",
+    "weight": 0.8
+  },
+  {
+    "type": "Regex",
+    "value": "^using .*;$",
+    "weight": 0.2
+  }
+]
