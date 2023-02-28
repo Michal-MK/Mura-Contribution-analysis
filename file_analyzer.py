@@ -8,6 +8,7 @@ from pathlib import Path
 import Levenshtein
 
 from history_analyzer import FileSection
+from semantic_analysis import load_lang_constructs
 
 ignore_list = os.path.join(Path(__file__).parent, "data", "ignore-list.txt")
 loaded_weight_maps: Dict[str, 'WeightMap'] = {}
@@ -130,6 +131,7 @@ def _ignored_files() -> List[str]:
 def get_tracked_files(project_root: Path) -> List[FileGroup]:
     """
     Find all files that are related, relative to the project root
+    :
     :param project_root: The root directory of the project
     :return: A dictionary of all directories and their files which are related to each other
     """
@@ -217,8 +219,8 @@ def compute_file_weight(file: Path) -> FileWeight:
     with open(file, 'r', encoding='UTF-8-SIG') as f:
         lines = f.readlines()
         line_weights = compute_lines_weight(file, lines)
-        semanic_weight = compute_semantic_weight(file, lines)
-        return FileWeight(file, line_weights, semanic_weight)
+        semantic_weight = compute_semantic_weight(file, lines)
+        return FileWeight(file, line_weights, semantic_weight)
 
 def compute_lines_weight(file: Path, lines: List[str]):
     strip_chars = ' \t\r\n'
@@ -235,6 +237,6 @@ def compute_lines_weight(file: Path, lines: List[str]):
         ret.append(weight)
     return ret
 
-# def compute_semantic_weight(file: Path, lines: List[str]):
-#     constructs = load_lang_constructs(file)
-#     return constructs.analyze(lines)
+def compute_semantic_weight(file: Path, lines: List[str]) -> Dict[FileSection, float]:
+    constructs = load_lang_constructs(file)
+    return constructs.analyze(lines)
