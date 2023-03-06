@@ -117,6 +117,11 @@ class FileSection:
         self.change_len = change_len - prev_len
         self.mode = mode
 
+    def __repr__(self):
+        return f"FileSection(prev={self.prev_start}-{self.prev_end} ({self.prev_len}), " \
+               f"change={self.change_start}-{self.change_end} ({self.new_len}/{self.change_len}), " \
+               f"mode={self.mode})"
+
 
 class Change:
     def __init__(self, author: str) -> None:

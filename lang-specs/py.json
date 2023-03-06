@@ -1,0 +1,16 @@
+{
+  "block_class_construct": {
+    "start_identifier": "\\s*class\\s+[a-zA-Z_][a-zA-Z0-9_]*\\s*(.*)?\\s*\\:",
+    "end_identifier": ""
+  },
+  "block_function_construct": {
+    "start_identifier": "\\s*(async\\s+)?def\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\((.*)\\)\\s*\\:",
+    "end_identifier": ""
+  },
+  "variable_construct": {
+    "identifier": null
+  },
+  "property_construct": {
+    "identifier": "\\s*@property\\s*"
+  }
+}

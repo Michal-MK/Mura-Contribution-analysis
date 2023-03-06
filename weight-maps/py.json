@@ -1,0 +1,12 @@
+[
+  {
+    "type": "Regex",
+    "value": "\\s*pass\\s*",
+    "weight": 0
+  },
+  {
+    "type": "Regex",
+    "value": "^import .*;$",
+    "weight": 0.2
+  }
+]

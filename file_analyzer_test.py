@@ -2,7 +2,8 @@ import unittest
 from pathlib import Path
 
 from environment import TURTLE_GRAPHICS_REPO
-from file_analyzer import get_tracked_files, compute_file_weight, has_weight_map
+from file_analyzer import compute_file_weight, has_weight_map
+from lib import get_tracked_files
 
 repos_path = "repositories"
 single_commit = repos_path + "\\single_commit"

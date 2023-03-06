@@ -51,21 +51,26 @@ class LangSpec:
                 self.constructs.append(LineConstruct(data["identifier"]))
 
     def analyze(self, lines: List[str]) -> Dict[FileSection, float]:
-        ret = {}
+        ret : Dict[FileSection, float] = {}
 
         line_no = 0
         for line in lines:
             for construct in self.constructs:
                 if isinstance(construct, LineConstruct):
                     if construct.line.match(line):
-                        ret[FileSection(line_no, line_no, 0, 0, "ADD")] = 1
+                        ret[FileSection(line_no, 1, 0, 0, "-")] = 1
+                        break
                 elif isinstance(construct, BlockConstruct):
                     if construct.block_start.match(line):
-                        ret[FileSection(line_no, line_no, 0, 0, "ADD")] = 1
+                        ret[FileSection(line_no, 1, 0, 0, "-")] = 1
+                        break
             line_no += 1
 
         return ret
 
+def compute_semantic_weight(file: Path, lines: List[str]) -> Dict[FileSection, float]:
+    constructs = load_lang_constructs(file)
+    return constructs.analyze(lines)
 
 def has_semantics(file: Path) -> bool:
     if file.is_dir():
