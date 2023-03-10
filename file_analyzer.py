@@ -36,7 +36,7 @@ class BlankLineHandler:
         self.count = 0
 
 class FileWeight:
-    def __init__(self, file: Path, line_weights: List[float], semantic_weight: Dict[FileSection, float]):
+    def __init__(self, file: Path, line_weights: List[float], semantic_weight: float):
         self.file = file
         self.line_weights = line_weights
         self.semantic_weight = semantic_weight
