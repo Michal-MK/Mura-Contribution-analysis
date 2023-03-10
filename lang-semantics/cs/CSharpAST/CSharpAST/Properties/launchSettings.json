@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "CSharpAST": {
+      "commandName": "Project",
+      "commandLineArgs": "lang-specs/cs.json repositories/single_file/NasModel.cs",
+      "workingDirectory": "C:\\MUNI\\xth. semester\\sdipr\\src"
+    }
+  }
+}

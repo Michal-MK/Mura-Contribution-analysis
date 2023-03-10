@@ -129,7 +129,7 @@ def compute_file_weight(file: Path) -> FileWeight:
     with open(file, 'r', encoding='UTF-8-SIG') as f:
         lines = f.readlines()
         line_weights = compute_lines_weight(file, lines)
-        semantic_weight = compute_semantic_weight(file, lines)
+        semantic_weight = compute_semantic_weight(file)
         return FileWeight(file, line_weights, semantic_weight)
 
 def compute_lines_weight(file: Path, lines: List[str]):

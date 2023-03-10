@@ -15,8 +15,20 @@ class SemanticsAnalyzerTest(unittest.TestCase):
             for file in group.files:
                 print(file)
                 if file.suffix == ".cs":
-                    sem_w = compute_semantic_weight(file, file.read_text().splitlines(keepends=True))
+                    sem_w = compute_semantic_weight(file)
                     weights.append(sem_w)
         pass
+
+    def test_semantic_weight_single_file(self):
+        weights = []
+        file_groups = get_tracked_files(Path('repositories/single_file'))
+        for group in file_groups:
+            for file in group.files:
+                print(file)
+                if file.suffix == ".cs":
+                    sem_w = compute_semantic_weight(file)
+                    weights.append(sem_w)
+        pass
+
 if __name__ == '__main__':
     unittest.main()

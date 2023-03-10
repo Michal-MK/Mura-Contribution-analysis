@@ -3,6 +3,7 @@ import re
 from collections import deque, defaultdict
 from typing import List, Dict, Tuple, Deque, Optional, DefaultDict, Set
 
+import git
 from git import Repo
 
 import lib
@@ -18,6 +19,15 @@ ROOT_HASH = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 HUNK_HEADER_PATTERN: re.Pattern[str] = re.compile(
     r"@@ -(\d+)(?:,(\d+))? \+(?P<change_start>\d+)(?:,(?P<change_end>\d+))? @@")
 
+
+class CommitHistory:
+    def __init__(self, name: str, path: List[str]):
+        self.name = name
+        self.path = path
+
+    @property
+    def head(self) -> str:
+        return self.path[-1] if len(self.path) > 0 else ''
 
 class CommitRange:
     def __init__(self, head: str, host: str, repo: Repo):
@@ -64,14 +74,14 @@ class CommitRange:
 
         return ret
 
-    def find_unmerged_branches(self):
+    def find_unmerged_branches(self, end_date: Optional[float] = None) -> List[CommitHistory]:
         """
         Find all unmerged branches in the repository <repo>
         :return: A list of all unmerged branches
         """
         main_path = self.compute_path()
 
-        head_date = self.repo.commit(self.head).committed_date
+        head_date = end_date if end_date is not None else self.repo.commit(self.head).committed_date
         hist_date = self.repo.commit(self.hist).committed_date
 
         reversed_path = list(main_path)
@@ -100,11 +110,28 @@ class CommitRange:
 
             visited.add(parent)
 
-            print(f"Commit {parent} has contains unmerged code in at least one branch: {children}")
-            path = create_path(parent, tree, self.repo, [])
-            path.insert(0, parent)
-            print(path)
+            ret: List[CommitHistory] = []
 
+            for child in children:
+                path = []
+                identifier: str = ""
+                visited.add(child)
+                while child in tree:
+                    path.append(child)
+                    _parent = child
+                    child = tree[child]
+                    if isinstance(child, list):
+                        if len(child) > 1:
+                            print(f"The unmerged branch branches again.")
+                            break
+                        if len(child) == 0:
+                            identifier = (self.repo.git.execute(f'git branch --contains {_parent}').strip() + " " +
+                                          self.repo.git.execute(f'git tag --contains {_parent}').strip()).strip()
+                            break
+                        child = child[0]
+                path.insert(0, parent)
+                ret.append(CommitHistory(identifier, path))
+            return ret
 
 class FileSection:
     def __init__(self, prev_start: int, prev_len: int, change_start: int, change_len: int, mode: Optional[str]):

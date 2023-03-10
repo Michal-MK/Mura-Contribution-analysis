@@ -1,96 +1,53 @@
-import json
 import os
-import re
+import subprocess
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 from history_analyzer import FileSection
 
-loaded_semantics: Dict[str, 'LangSpec'] = {}
+LANG_SEMANTICS_PATH = Path(__file__).parent / "lang-semantics"
+
+SEMANTIC_ANALYZERS: Dict[str, 'LangSemantics'] = {}
 
 
-class LangConstruct:
-    def __init__(self, parent: Optional['LangConstruct'] = None) -> None:
-        self.parent = parent
+class LangSemantics:
+    def __init__(self, lang_dir: Path, tool_executable: str):
+        self.lang_dir = lang_dir
+        self.tool = tool_executable
+
+    def analyze(self, file: Path) -> Dict[FileSection, float]:
+        args = [*self.tool.split(), str(self.lang_dir.parent / "declarations.json"), str(file)]
+        print(f"Analyzing {file} with command: {args} in {self.lang_dir}")
+        process = subprocess.run(args, check=True, cwd=self.lang_dir, stdout=subprocess.PIPE, shell=True)
+        output = process.stdout.decode("utf-8")
+        lines = output.splitlines()
+        print(lines)
+        return {}
 
 
-class LineConstruct(LangConstruct):
-    def __init__(self, line: str, parent: Optional[LangConstruct] = None) -> None:
-        super().__init__(parent)
-        self.line = re.compile(line)
+def compute_semantic_weight(file: Path) -> Dict[FileSection, float]:
+    semantics = load_semantic_parser(file)
+    assert semantics is not None, f"No semantic parser for {file}"
+
+    return semantics.analyze(file)
 
 
-class BlockConstruct(LangConstruct):
-    def __init__(self, block_start: str, block_end: str, parent: Optional[LangConstruct] = None) -> None:
-        super().__init__(parent)
-        self.block_start = re.compile(block_start)
-        self.block_end = re.compile(block_end)
+def has_semantic_parser(file: Path) -> bool:
+    return load_semantic_parser(file) is not None
 
 
-class LangSpec:
-    def __init__(self):
-        self.constructs: List[LangConstruct] = []
-        self.is_object_oriented: bool
+def load_semantic_parser(file: Path) -> Optional[LangSemantics]:
+    extension = file.suffix.lstrip('.')
 
-    def load(self, file):
-        semantics: Dict[str, Any] = json.load(file)
-        CLASS = "block_class_construct"
-        FUNCTION = "block_function_construct"
-        VARIABLE = 'variable_construct'
-        PROPERTY = 'property_construct'
+    if extension in SEMANTIC_ANALYZERS:
+        return SEMANTIC_ANALYZERS[extension]
 
-        for section in [CLASS, FUNCTION, VARIABLE, PROPERTY]:
-            if section not in semantics:
-                continue
-            data = semantics[section]
-            if section in [CLASS, FUNCTION]:
-                self.constructs.append(BlockConstruct(data["start_identifier"], data["end_identifier"]))
-            elif section == PROPERTY:
-                self.constructs.append(LineConstruct(data["identifier"]))
-            elif section == VARIABLE:
-                self.constructs.append(LineConstruct(data["identifier"]))
+    lang_folder = LANG_SEMANTICS_PATH / extension
+    if not lang_folder.exists():
+        return None
+    target_file = lang_folder / "target"
+    executable = target_file.read_text(encoding="utf-8-sig")
 
-    def analyze(self, lines: List[str]) -> Dict[FileSection, float]:
-        ret : Dict[FileSection, float] = {}
+    full_path = lang_folder.absolute()
 
-        line_no = 0
-        for line in lines:
-            for construct in self.constructs:
-                if isinstance(construct, LineConstruct):
-                    if construct.line.match(line):
-                        ret[FileSection(line_no, 1, 0, 0, "-")] = 1
-                        break
-                elif isinstance(construct, BlockConstruct):
-                    if construct.block_start.match(line):
-                        ret[FileSection(line_no, 1, 0, 0, "-")] = 1
-                        break
-            line_no += 1
-
-        return ret
-
-def compute_semantic_weight(file: Path, lines: List[str]) -> Dict[FileSection, float]:
-    constructs = load_lang_constructs(file)
-    return constructs.analyze(lines)
-
-def has_semantics(file: Path) -> bool:
-    if file.is_dir():
-        return False
-    suffix = file.suffix.lstrip('.')
-    return os.path.isfile(os.path.join(Path(__file__).parent, "lang-specs", suffix + ".json"))
-
-
-def load_lang_constructs(file_path: Path) -> LangSpec:
-    """
-    Load the semantics of a file
-    :param file_path: The file to load the weight map for
-    :return: The weight map
-    """
-    suffix = file_path.suffix.lstrip('.')
-    if suffix not in loaded_semantics:
-        ret = LangSpec()
-        with open(os.path.join(Path(__file__).parent, "lang-specs", suffix + ".json"), 'r') as f:
-            ret.load(f)
-            loaded_semantics[suffix] = ret
-        return ret
-    else:
-        return loaded_semantics[suffix]
+    return LangSemantics(full_path, executable)

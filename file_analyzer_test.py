@@ -29,7 +29,7 @@ class FileAnalyzerTest(unittest.TestCase):
         min_w = min(weights, key=lambda x: x.total_line_weight)
         print(f"Lowest weight {min_w.file}: {min_w.average_line_weight} / {min_w.maximum_achievable_line_weight}")
 
-        file_weight = compute_file_weight(Path(single_file))
+        file_weight = compute_file_weight(Path(single_file).absolute())
         print(file_weight.average_line_weight)
         print(file_weight.total_line_weight)
         print(file_weight.maximum_achievable_line_weight)

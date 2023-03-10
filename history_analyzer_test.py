@@ -1,3 +1,4 @@
+import datetime
 import unittest
 from math import isclose
 from typing import List
@@ -10,6 +11,7 @@ from history_analyzer import get_file_changes, AuthorName, CommitRange, calculat
 
 TEST_REPO2 = ".\\repositories\\single_file"
 TEST_REPO_UNMERGED = ".\\repositories\\unmerged"
+TEST_REPO_UNMERGED_MULTIPLE = ".\\repositories\\unmerged_multiple"
 
 
 def by(section: List[AuthorName], author: AuthorName):
@@ -45,7 +47,7 @@ class HistoryAnalyzerTest(unittest.TestCase):
         self.assertTrue(ownership['NasModel.cs'].hunks[2].change_start == 75)
         self.assertTrue(ownership['NasModel.cs'].hunks[2].change_len == 1)
 
-    def test_analyze_1(self):
+    def test_analyze_all_changes_by_me_first_commit(self):
         repo = git.Repo(TEST_REPO2)
         lib.set_repo(repo)
         lib.try_checkout('e4b73d4152c5e9e6c854fbf1df99011bf16e3eb9', True)
@@ -57,7 +59,7 @@ class HistoryAnalyzerTest(unittest.TestCase):
         num_changes_done_by_me = len(list(filter(lambda x: x == 'Michal-MK', result['NasModel.cs'].changes)))
         self.assertTrue(num_changes_done_by_me == result['NasModel.cs'].line_count)
 
-    def test_analyze_2(self):
+    def test_analyze_all_changes_by_me_early_commit(self):
         repo = git.Repo(TEST_REPO2)
         lib.set_repo(repo)
         lib.try_checkout('9d5b319e1302d4bfa79b44c639b1c7de82d6a9c7', True)
@@ -69,7 +71,7 @@ class HistoryAnalyzerTest(unittest.TestCase):
         num_changes_done_by_me = len(list(filter(lambda x: x == 'Michal-MK', result['NasModel.cs'].changes)))
         self.assertTrue(num_changes_done_by_me == result['NasModel.cs'].line_count)
 
-    def test_analyze_3(self):
+    def test_analyze_all_changes_by_me(self):
         repo = git.Repo(TEST_REPO2)
         lib.set_repo(repo)
         lib.try_checkout('96192b7ac9b3484a6e647519fb67f0be620f0bd5', True)
@@ -81,7 +83,7 @@ class HistoryAnalyzerTest(unittest.TestCase):
         num_changes_done_by_me = len(list(filter(lambda x: x == 'Michal-MK', result['NasModel.cs'].changes)))
         self.assertTrue(num_changes_done_by_me == result['NasModel.cs'].line_count)
 
-    def test_analyze_4(self):
+    def test_analyze_line_distribution_between_authors(self):
         repo = git.Repo(TEST_REPO2)
         lib.set_repo(repo)
         lib.try_checkout('aa1b0d3dd95ffcbbd0827f147a912888a5ced8bd', True)
@@ -94,7 +96,7 @@ class HistoryAnalyzerTest(unittest.TestCase):
         self.assertTrue(by(result['NasModel.cs'].changes[76:76 + 7], "Other Name"))
         self.assertTrue(by(result['NasModel.cs'].changes[83:85], "Michal-MK"))
 
-    def test_percentage(self):
+    def test_analyze_percentage(self):
         repo = git.Repo(TEST_REPO2)
         lib.set_repo(repo)
         lib.try_checkout('aa1b0d3dd95ffcbbd0827f147a912888a5ced8bd', True)
@@ -111,6 +113,35 @@ class HistoryAnalyzerTest(unittest.TestCase):
         lib.set_repo(repo)
         c_range = CommitRange('HEAD', 'ROOT', repo)
         unmerged = c_range.find_unmerged_branches()
+
+        self.assertTrue(len(unmerged) == 1)
+        self.assertTrue(unmerged[0].name == 'second_branch')
+        self.assertTrue(len(unmerged[0].path) == 3)
+
+
+def test_find_unmerged_multiple(self):
+        repo = git.Repo(TEST_REPO_UNMERGED_MULTIPLE)
+        lib.set_repo(repo)
+        c_range = CommitRange('HEAD', 'ROOT', repo)
+        unmerged = c_range.find_unmerged_branches(datetime.datetime.now().timestamp())
+
+        unmerged.sort(key=lambda x: x.name)
+
+        self.assertTrue(len(unmerged) == 2)
+        self.assertTrue(unmerged[1].name == 'branch2')
+        self.assertTrue(unmerged[0].name == 'branch1 some-tag')
+
+        self.assertTrue(unmerged[1].head == 'a34e9dc8bc9ee55584120e40209ac97bb388fcc9')
+        self.assertTrue(unmerged[0].head == '689a14b3823fafbd6bb927b5409692bdb02eb96a')
+
+        self.assertTrue('932ccb27444ebc67fb3e83e745072902f88ec82b' in unmerged[1].path)
+        self.assertTrue('676ecb3fb829d166ad8594a54b4bd8ae4b503bd5' in unmerged[0].path)
+
+        self.assertTrue(unmerged[1].path[0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
+        self.assertTrue(unmerged[0].path[0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
+
+        self.assertTrue(len(unmerged[1].path) == 3)
+        self.assertTrue(len(unmerged[0].path) == 3)
 
 
 if __name__ == '__main__':
