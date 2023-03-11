@@ -1,0 +1,22 @@
+property_field_lower_limit_multiplier = 0.8
+property_field_lower_limit = 4
+property_field_upper_limit_multiplier = 0.5
+property_field_upper_limit = 20
+
+function_lower_limit_multiplier = 0.8
+function_lower_limit = 4
+function_upper_limit_multiplier = 0.5
+function_upper_limit = 15
+
+class_upper_limit_multiplier = 0.5
+class_upper_limit = 1
+
+length_lower_limit_multiplier = 0.8
+length_lower_limit = 50
+length_upper_limit_multiplier = 0.5
+length_upper_limit = 1_000
+
+base_property_or_field_weight = 5
+base_function_weight = 10
+base_class_weight = 10
+base_length_weight = 50

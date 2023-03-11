@@ -1,20 +1,12 @@
-import json
 import os
-import re
-from enum import Enum
-from typing import List, Dict, Any
+from typing import List, Dict
 from pathlib import Path
 
-import Levenshtein
-
-from history_analyzer import FileSection
 from semantic_analysis import compute_semantic_weight
+from semantic_weight_model import SemanticWeightModel
+from syntactic_weight_model import SyntacticWeightModel
 
-loaded_weight_maps: Dict[str, 'WeightMap'] = {}
-
-class PatternType(Enum):
-    Literal = 1
-    Regex = 2
+loaded_weight_maps: Dict[str, 'SyntacticWeightModel'] = {}
 
 
 class BlankLineHandler:
@@ -35,18 +27,26 @@ class BlankLineHandler:
     def clear(self):
         self.count = 0
 
+
 class FileWeight:
-    def __init__(self, file: Path, line_weights: List[float], semantic_weight: float):
+    def __init__(self, file: Path, line_weights: List[float], weight_model: SemanticWeightModel,
+                 semantic_weight: float):
         self.file = file
         self.line_weights = line_weights
+        self.weight_model = weight_model
         self.semantic_weight = semantic_weight
 
     @property
     def total_line_weight(self):
         return sum(self.line_weights)
 
+    @property
+    def syntactic_weight(self):
+        return self.average_line_weight * self.weight_model.average_base_weight
+
+    @property
     def final_weight(self):
-        return self.total_line_weight
+        return self.syntactic_weight + self.semantic_weight
 
     @property
     def average_line_weight(self):
@@ -57,49 +57,7 @@ class FileWeight:
         return len(self.line_weights)
 
 
-class WeightMap:
-    class Entry:
-        def __init__(self, pattern_type: PatternType, pattern: str, exactness: int, weight: int) -> None:
-            self.pattern_type = pattern_type
-            self.pattern = pattern
-            self.exactness = exactness
-            self.weight = weight
-            self.regex_pattern = re.compile(pattern) if pattern_type == PatternType.Regex else None
-
-        def matches(self, line: str) -> bool:
-            """
-            Decide whether the line matches the pattern of this entry
-            """
-            if self.pattern_type == PatternType.Literal:
-                return Levenshtein.distance(self.pattern, line) <= self.exactness
-            elif self.pattern_type == PatternType.Regex:
-                assert self.regex_pattern is not None
-                return self.regex_pattern.match(line) is not None
-            return False  # Undefined case
-
-    def __init__(self):
-        self.base_weight = 1
-        self.weights: List[WeightMap.Entry] = []
-
-    def load(self, file):
-        weight_map: List[Dict[str, Any]] = json.load(file)
-
-        for entry in weight_map:
-            self.weights.append(WeightMap.Entry(
-                PatternType.Literal if entry["type"] == "Literal" else PatternType.Regex,
-                entry["value"],
-                entry["exactness"] if "exactness" in entry else 0,
-                entry["weight"]
-            ))
-
-    def get_weight(self, line: str) -> float:
-        for key in self.weights:
-            if key.matches(line):
-                return key.weight
-        return self.base_weight
-
-
-def load_weight_map(file_path: Path) -> WeightMap:
+def load_weight_map(file_path: Path) -> SyntacticWeightModel:
     """
     Load the weight map for a file
     :param file_path: The file to load the weight map for
@@ -107,18 +65,20 @@ def load_weight_map(file_path: Path) -> WeightMap:
     """
     suffix = file_path.suffix.lstrip('.')
     if suffix not in loaded_weight_maps:
-        ret = WeightMap()
+        ret = SyntacticWeightModel()
         with open(os.path.join(Path(__file__).parent, "weight-maps", suffix + ".json"), 'r') as f:
             ret.load(f)
         return ret
     else:
         return loaded_weight_maps[suffix]
 
+
 def has_weight_map(file: Path) -> bool:
     if file.is_dir():
         return False
     suffix = file.suffix.lstrip('.')
     return os.path.isfile(os.path.join(Path(__file__).parent, "weight-maps", suffix + ".json"))
+
 
 def compute_file_weight(file: Path) -> FileWeight:
     """
@@ -129,8 +89,9 @@ def compute_file_weight(file: Path) -> FileWeight:
     with open(file, 'r', encoding='UTF-8-SIG') as f:
         lines = f.readlines()
         line_weights = compute_lines_weight(file, lines)
-        semantic_weight = compute_semantic_weight(file)
-        return FileWeight(file, line_weights, semantic_weight)
+        model, semantic_weight = compute_semantic_weight(file)
+        return FileWeight(file, line_weights, model, semantic_weight)
+
 
 def compute_lines_weight(file: Path, lines: List[str]):
     strip_chars = ' \t\r\n'
@@ -146,4 +107,3 @@ def compute_lines_weight(file: Path, lines: List[str]):
         weight = weight_map.get_weight(line)
         ret.append(weight)
     return ret
-

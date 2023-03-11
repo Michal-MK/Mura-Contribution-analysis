@@ -87,7 +87,9 @@ class CommitRange:
         reversed_path = list(main_path)
         reversed_path.reverse()
 
-        all_commits = self.repo.git.execute(["git", "log", "--format=%H", "--all"]).splitlines()
+        result = self.repo.git.execute(["git", "log", "--format=%H", "--all"])
+        assert isinstance(result, str)
+        all_commits = result.splitlines()
 
         all_in_range = []
         for commit in all_commits:

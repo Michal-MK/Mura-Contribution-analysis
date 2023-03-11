@@ -9,9 +9,9 @@ import lib
 from environment import TURTLE_GRAPHICS_REPO
 from history_analyzer import get_file_changes, AuthorName, CommitRange, calculate_percentage
 
-TEST_REPO2 = ".\\repositories\\single_file"
-TEST_REPO_UNMERGED = ".\\repositories\\unmerged"
-TEST_REPO_UNMERGED_MULTIPLE = ".\\repositories\\unmerged_multiple"
+TEST_REPO2 = "..\\repositories\\single_file"
+TEST_REPO_UNMERGED = "..\\repositories\\unmerged"
+TEST_REPO_UNMERGED_MULTIPLE = "..\\repositories\\unmerged_multiple"
 
 
 def by(section: List[AuthorName], author: AuthorName):

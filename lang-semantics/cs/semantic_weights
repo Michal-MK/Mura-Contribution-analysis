@@ -1,0 +1,7 @@
+# The C# semantic analyzer returns character offsets rather than line/column
+# numbers. The units are adjusted from the base semantic_weights file.
+
+length_lower_limit_multiplier = 0.8
+length_lower_limit = 200
+length_upper_limit_multiplier = 0.5
+length_upper_limit = 10_000
