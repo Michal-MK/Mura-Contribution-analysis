@@ -1,1 +1,0 @@
-TURTLE_GRAPHICS_REPO = r"C:\Repositories\TurtleGraphics"
