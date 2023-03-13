@@ -2,6 +2,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
+from lib import FileGroup
 from semantic_weight_model import SemanticWeightModel
 
 LANG_SEMANTICS_PATH = Path(__file__).parent / "lang-semantics"
@@ -19,7 +20,6 @@ class LangStructure:
 
     def in_range(self, start: int, end: int) -> bool:
         return self.start <= start and self.end >= end
-
 
     def compute_weight(self, weight_model: SemanticWeightModel) -> float:
         total_length_multiplier = 1.0
@@ -59,9 +59,11 @@ class LangStructure:
         property_or_field_count = len(list(filter(lambda x: x.kind == 'property' or x.kind == 'field', self.children)))
 
         if property_or_field_count > weight_model.property_field_upper_limit:
-            property_or_field_count_multiplier = weight_model.property_field_upper_limit_multiplier - 0.05 * (property_or_field_count - 20)
+            property_or_field_count_multiplier = weight_model.property_field_upper_limit_multiplier - 0.05 * (
+                        property_or_field_count - 20)
         elif property_or_field_count < weight_model.property_field_lower_limit:
-            property_or_field_count_multiplier = weight_model.property_field_lower_limit_multiplier - 0.05 * (4 - property_or_field_count)
+            property_or_field_count_multiplier = weight_model.property_field_lower_limit_multiplier - 0.05 * (
+                        4 - property_or_field_count)
 
         weight += base_property_or_field_weight * property_or_field_count_multiplier
 
@@ -125,12 +127,30 @@ def compute_semantic_weight(file: Path) -> Tuple[SemanticWeightModel, float]:
     return semantics.analyze(file)
 
 
+def compute_semantic_weight_grouped(file_group: FileGroup) -> List[Tuple[SemanticWeightModel, float]]:
+    ret = []
+    for file in file_group.files:
+        abs_file = file.absolute()
+
+        if has_semantic_parser(abs_file):
+            sem_w = compute_semantic_weight(abs_file)
+            ret.append(sem_w)
+    return ret
+
+
 def has_semantic_parser(file: Path) -> bool:
     return load_semantic_parser(file) is not None
 
 
 def load_semantic_parser(file: Path) -> Optional[LangSemantics]:
     extension = file.suffix.lstrip('.')
+
+    if not extension and file.name.startswith('.'):
+        extension = file.name
+
+    if not extension:
+        # Now we reached files like "LICENCE" for which we have nothing
+        return None
 
     if extension in SEMANTIC_ANALYZERS:
         return SEMANTIC_ANALYZERS[extension]

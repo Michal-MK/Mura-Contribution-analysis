@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from typing import Union, List, Optional, Literal
 
+import git
 from git import Repo, Commit
 
 REPO: Repo
@@ -93,7 +94,7 @@ def _ignored_files() -> List[str]:
     return ret
 
 
-def get_tracked_files(project_root: Path) -> List[FileGroup]:
+def get_tracked_files(project_root: Union[Path, git.Repo]) -> List[FileGroup]:
     """
     Find all files that are related, relative to the project root
     :
@@ -101,6 +102,9 @@ def get_tracked_files(project_root: Path) -> List[FileGroup]:
     :return: A dictionary of all directories and their files which are related to each other
     """
     ret: List[FileGroup] = []
+
+    if isinstance(project_root, git.Repo):
+        project_root = Path(project_root.working_dir)
 
     for root, dirs, files in os.walk(project_root):
         to_remove = []

@@ -29,10 +29,11 @@ class CommitHistory:
     def head(self) -> str:
         return self.path[-1] if len(self.path) > 0 else ''
 
+
 class CommitRange:
-    def __init__(self, head: str, host: str, repo: Repo):
+    def __init__(self, head: str, hist: str, repo: Repo):
         self.head = head
-        self.hist = host
+        self.hist = hist
         self.repo = repo
 
     def compute_path(self) -> Deque[str]:
@@ -51,6 +52,30 @@ class CommitRange:
         ret.insert(0, self.hist)
         return ret
 
+    def checkout_file_from(self, commit_hash: str, file_name: str) -> None:
+        """
+        Checkout the file <file_name> from the parent of the commit with the hash <commit_hash>
+        :param commit_hash:
+        :param file_name:
+        :return:
+        """
+        commit = self.repo.commit(commit_hash)
+        self.repo.git.checkout(commit.hexsha, '--', file_name)
+
+    def populate_previously_unseen_file(self, change: 'Change', commit_hash: str, file_name: str,
+                                        ret: Dict[FileName, 'Ownership']) -> None:
+        cmd = ['git', 'cat-file', '-e', change.hunks[0].prev_file_hexsha]
+        status, sout, serr = self.repo.git.execute(cmd, with_extended_output=True)
+        if status == 0:
+            # Obtain the previous version of the file as a base
+            file_path = lib.repo_p(file_name, self.repo)
+            self.checkout_file_from(commit_hash, file_path)
+            with open(file_path, 'r', encoding='utf-8-sig') as f:
+                content = f.read()
+            ret[file_name] = Ownership(len(content.splitlines()))
+            for hunk in change.hunks:
+                ret[file_name].add_change(hunk, change.author)
+
     def analyze(self) -> AnalysisResult:
         """
         Analyze the repository <repo> from the commit with the hash <historical_commit_hash> to the commit with the hash
@@ -62,14 +87,34 @@ class CommitRange:
         ret: Dict[FileName, Ownership] = {}
 
         for commit_hash in path:
-            commit = self.repo.commit(commit_hash)
-            print(f"Analyzing commit {commit_hash} ({commit.message.rstrip()}) BY: {commit.author}")
+            # print(f"Analyzing commit {commit_hash} ({commit.message.rstrip()}) BY: {commit.author}")
             file_ownership = get_file_changes(commit_hash, self.repo)
             for file_name, change in file_ownership.items():
                 if file_name not in ret:
-                    assert len(change.hunks) == 1 and change.hunks[0].mode == 'A'
-                    ret[file_name] = Ownership(change.hunks[0].change_end)
+                    if change.hunks and change.hunks[0].mode == 'R':
+                        assert change.previous_name is not None
+                        if change.previous_name in ret:
+                            ret[file_name] = ret[change.previous_name]
+                            del ret[change.previous_name]
+                        else:
+                            self.populate_previously_unseen_file(change, commit_hash, file_name, ret)
+                        for hunk in change.hunks:
+                            ret[file_name].add_change(hunk, change.author)
+                    elif change.hunks and change.hunks[0].mode == 'A':
+                        ret[file_name] = Ownership(change.hunks[0].change_end)
+                    elif not change.hunks:
+                        # This is a binary file
+                        ret[file_name] = Ownership(-1)
+                    elif change.hunks[0].mode == 'M':
+                        # This file already existed in the repo, this can occur if the analysis does not
+                        # start from the first commit
+                        self.populate_previously_unseen_file(change, commit_hash, file_name, ret)
+
+                    continue
+
                 for hunk in change.hunks:
+                    if file_name not in ret and hunk.mode == 'D':
+                        continue
                     ret[file_name].add_change(hunk, change.author)
 
         return ret
@@ -135,8 +180,10 @@ class CommitRange:
                 ret.append(CommitHistory(identifier, path))
             return ret
 
+
 class FileSection:
-    def __init__(self, prev_start: int, prev_len: int, change_start: int, change_len: int, mode: Optional[str]):
+    def __init__(self, prev_start: int, prev_len: int, change_start: int, change_len: int, prev_file_hexsha,
+                 mode: Optional[str]):
         self.prev_start = prev_start
         self.prev_end = prev_start + prev_len
         self.prev_len = prev_len
@@ -144,38 +191,51 @@ class FileSection:
         self.change_end = change_start + change_len
         self.new_len = change_len
         self.change_len = change_len - prev_len
+        self.prev_file_hexsha = prev_file_hexsha
         self.mode = mode
 
     def __repr__(self):
         return f"FileSection(prev={self.prev_start}-{self.prev_end} ({self.prev_len}), " \
                f"change={self.change_start}-{self.change_end} ({self.new_len}/{self.change_len}), " \
-               f"mode={self.mode})"
+               f"prev_file_hexsha={self.prev_file_hexsha}, mode={self.mode})"
 
 
 class Change:
     def __init__(self, author: str) -> None:
         self.hunks: List[FileSection] = []
         self.author = author
+        self.previous_name: Optional[str] = None
+        self.is_binary = False
 
     def add_hunk(self, prev_start: int, prev_len: int, change_start: int, change_len: int,
-                 mode: Optional[str] = None) -> None:
-        self.hunks.append(FileSection(prev_start, prev_len, change_start, change_len, mode))
+                 previous_file_hexsha: bytes, mode: Optional[str] = None) -> None:
+        self.hunks.append(FileSection(prev_start, prev_len, change_start, change_len, previous_file_hexsha, mode))
 
 
 class Ownership:
     def __init__(self, init_line_count: int) -> None:
         self.history: OwnershipHistory = []
         self.changes: List[AuthorName] = ['' for _ in range(init_line_count)]
+        if init_line_count == -1:
+            # This is a binary file
+            self.changes = ['']
         self._line_count = init_line_count  # Lines are indexes starting with 1
         self.line_count = init_line_count - 1
 
     def add_change(self, hunk: FileSection, author: AuthorName) -> None:
         self.history.append(copy.deepcopy(self.changes))
 
-        assert hunk.change_start >= 0 and hunk.change_start <= self._line_count
+        if self._line_count == -1:
+            # This is a binary file
+            self.changes[0] = author
+            return
 
+        try:
+            assert hunk.change_start >= 0 and hunk.change_start <= self._line_count
+        except Exception as e:
+            pass
         if hunk.change_len > 0 and hunk.mode != 'A':
-            for i in range(hunk.change_len):
+            for i in range(hunk.change_len + 1):
                 self.changes.insert(hunk.change_start + i, '_')
             self._line_count = len(self.changes)
             self.line_count = self._line_count - 1
@@ -200,19 +260,35 @@ def get_file_changes(commit_hash: str, repo: Repo) -> Dict[FileName, Change]:
     ret = {}
 
     for diff in d:
-        unified_diff_str = diff.diff.decode('utf-8')
+        try:
+            unified_diff_str = diff.diff.decode('utf-8')
+        except UnicodeDecodeError:
+            unified_diff_str = diff.diff.decode('latin-1')
+            # Fallback decode to latin-1
         matches = HUNK_HEADER_PATTERN.findall(unified_diff_str)
         author = commit.author.name
         assert author is not None, f"Author name is None for commit {commit_hash} ({commit.message})"
-        ret[diff.b_path] = Change(author)
-        mode = "A" if len(matches) == 1 and diff.new_file else "M"
+        actual_path = diff.b_path if diff.b_path is not None else diff.a_path
+        if diff.b_path is None:
+            ret[actual_path] = Change(author)
+            mode = "D"
+        else:
+            ret[actual_path] = Change(author)
+            mode = "A" if diff.new_file else "M"
+        if diff.renamed:
+            mode = "R"
+            ret[actual_path].previous_name = diff.a_path
         for match in matches:
             prev_line_start, prev_line_len, line_start, line_len = match
             change_start = int(line_start)
             change_len = int(line_len) if line_len != '' else 1
             prev_start = int(prev_line_start)
             prev_len = int(prev_line_len) if prev_line_len != '' else 1
-            ret[diff.b_path].add_hunk(prev_start, prev_len, change_start, change_len, mode)
+            ret[actual_path].add_hunk(prev_start, prev_len, change_start, change_len,
+                                      diff.a_blob.hexsha if diff.a_blob is not None else diff.b_blob.hexsha, mode)
+        if not matches:
+            # no matches
+            ret[actual_path].is_binary = True
 
     return ret
 
