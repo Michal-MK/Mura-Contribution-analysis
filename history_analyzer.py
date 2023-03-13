@@ -101,10 +101,10 @@ class CommitRange:
                         for hunk in change.hunks:
                             ret[file_name].add_change(hunk, change.author)
                     elif change.hunks and change.hunks[0].mode == 'A':
-                        ret[file_name] = Ownership(change.hunks[0].change_end)
+                        ret[file_name] = Ownership(change.hunks[0].change_end, change.author)
                     elif not change.hunks:
                         # This is a binary file
-                        ret[file_name] = Ownership(-1)
+                        ret[file_name] = Ownership(-1, change.author)
                     elif change.hunks[0].mode == 'M':
                         # This file already existed in the repo, this can occur if the analysis does not
                         # start from the first commit
@@ -213,12 +213,13 @@ class Change:
 
 
 class Ownership:
-    def __init__(self, init_line_count: int) -> None:
+    def __init__(self, init_line_count: int, author: str = '') -> None:
         self.history: OwnershipHistory = []
-        self.changes: List[AuthorName] = ['' for _ in range(init_line_count)]
-        if init_line_count == -1:
-            # This is a binary file
-            self.changes = ['']
+        self.changes: List[AuthorName] = [author for _ in range(init_line_count)]
+        if not self.changes or init_line_count == -1:
+            # Empty file or binary file
+            self.changes = [author]
+        self.changes[0] = ''
         self._line_count = init_line_count  # Lines are indexes starting with 1
         self.line_count = init_line_count - 1
 
@@ -230,13 +231,23 @@ class Ownership:
             self.changes[0] = author
             return
 
-        try:
-            assert hunk.change_start >= 0 and hunk.change_start <= self._line_count
-        except Exception as e:
-            pass
+        assert hunk.change_start >= 0 and hunk.change_start <= self._line_count + 1 # +1 for a possibly missing new line
+
         if hunk.change_len > 0 and hunk.mode != 'A':
-            for i in range(hunk.change_len + 1):
+            for i in range(hunk.change_len):
                 self.changes.insert(hunk.change_start + i, '_')
+            self._line_count = len(self.changes)
+            self.line_count = self._line_count - 1
+
+        if hunk.change_start == len(self.changes):
+            # File did not end with a newline, and we are extending it
+            self.changes.append('')
+            self._line_count = len(self.changes)
+            self.line_count = self._line_count - 1
+
+        if hunk.change_end == len(self.changes) + 1:
+            # File did not end with a newline, and we are extending it
+            self.changes.append('')
             self._line_count = len(self.changes)
             self.line_count = self._line_count - 1
 
