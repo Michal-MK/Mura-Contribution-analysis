@@ -9,7 +9,7 @@ from semantic_analysis import compute_semantic_weight_grouped
 from test.environment import TWO_CONTRIB_REPO
 
 
-class IntegationTest(unittest.TestCase):
+class IntegrationTest(unittest.TestCase):
 
     def test_integration_one(self):
         repo = git.Repo(TWO_CONTRIB_REPO)

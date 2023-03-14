@@ -254,6 +254,9 @@ class Ownership:
         for i in range(hunk.change_start, hunk.change_end):
             self.changes[i] = author
 
+    def __str__(self):
+        return f"Ownership(lines={self.line_count}, changes={self.changes})"
+
 
 def get_file_changes(commit_hash: str, repo: Repo) -> Dict[FileName, Change]:
     """
