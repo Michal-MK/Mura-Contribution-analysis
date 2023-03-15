@@ -14,7 +14,7 @@ Dictionary<string, SyntaxKind> SUPPORTED_DECLARATIONS = new() {
 	{ "function", SyntaxKind.MethodDeclaration },
 	{ "property", SyntaxKind.PropertyDeclaration },
 	{ "field", SyntaxKind.FieldDeclaration },
-	{ "namespace", SyntaxKind.NamespaceDeclaration }
+	{ "namespace", SyntaxKind.NamespaceDeclaration },
 };
 
 Dictionary<SyntaxKind, string> REVERSE_SUPPORTED_DECLARATIONS = SUPPORTED_DECLARATIONS.ToDictionary(input => input.Value, input => input.Key);
@@ -22,7 +22,16 @@ Dictionary<SyntaxKind, string> REVERSE_SUPPORTED_DECLARATIONS = SUPPORTED_DECLAR
 string[] expectedDeclarations = ((JsonArray)JsonNode.Parse(File.ReadAllText(configurationPath))).Select(s => s.GetValue<string>()).ToArray();
 
 bool IsSupportedNodeOrToken(SyntaxNodeOrToken nodeOrToken) {
-	return SUPPORTED_DECLARATIONS.Values.Contains(nodeOrToken.Kind());
+	return SUPPORTED_DECLARATIONS.Values.Contains(nodeOrToken.Kind())
+		|| nodeOrToken.Kind() == SyntaxKind.MultiLineCommentTrivia
+		|| nodeOrToken.Kind() == SyntaxKind.SingleLineCommentTrivia;
+}
+
+string ReverseKind(SyntaxKind kind) {
+	if (kind == SyntaxKind.MultiLineCommentTrivia || kind == SyntaxKind.SingleLineCommentTrivia) {
+		return "comment";
+	}
+	return REVERSE_SUPPORTED_DECLARATIONS[kind];
 }
 
 string fileContent = File.ReadAllText(filePath);
@@ -32,11 +41,19 @@ var compilationUnit = ast.GetCompilationUnitRoot();
 var nodesAndTokens = compilationUnit.DescendantNodesAndTokensAndSelf();
 
 foreach (var descendant in nodesAndTokens.Where(IsSupportedNodeOrToken)) {
-	string kind = REVERSE_SUPPORTED_DECLARATIONS[descendant.Kind()];
+	string kind = ReverseKind(descendant.Kind());
 	if (!expectedDeclarations.Contains(kind)) {
 		continue;
 	}
 	Console.WriteLine($"{kind} - [{descendant.Span.Start}-{descendant.Span.End}]");
+}
+
+foreach (var trivia in compilationUnit.DescendantTrivia()
+	.Where(w => w.IsKind(SyntaxKind.SingleLineCommentTrivia)
+			 || w.IsKind(SyntaxKind.MultiLineCommentTrivia)
+			 || w.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia)
+			 || w.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia))) {
+	Console.WriteLine($"comment - [{trivia.Span.Start}-{trivia.Span.End}]");
 }
 
 return 0;

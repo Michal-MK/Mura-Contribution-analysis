@@ -1,15 +1,17 @@
 import json
 import sys
-import ast
-from _ast import FunctionDef, ClassDef, Assign, Name, Attribute, Module, stmt
+import ast_comments  # type: ignore
+from _ast import FunctionDef, ClassDef, Assign, Name, Attribute, Module, stmt, Expr, Constant
 from pathlib import Path
 from typing import Union
+from libcst import parse_module
+
 
 SUPPORTED_DECLARATIONS = ['class', 'function', 'property', 'field']
 
 ASKED_DECLARATION = []
 
-def read_token(token: Union[FunctionDef, ClassDef, Assign, stmt]) -> None:
+def read_token(token: Union[FunctionDef, ClassDef, Assign, Expr, stmt]) -> None:
     if isinstance(token, FunctionDef):
         if any(filter(lambda x: isinstance(x, Name) and x.id == 'property', token.decorator_list)):
             print(f"property - [{token.lineno}-{token.end_lineno}]")
@@ -26,6 +28,12 @@ def read_token(token: Union[FunctionDef, ClassDef, Assign, stmt]) -> None:
     if isinstance(token, ClassDef):
         print(f"class - [{token.lineno}-{token.end_lineno}]")
         read_body(token)
+    if isinstance(token, Expr):
+        if isinstance(token.value, Constant):
+            if isinstance(token.value.value, str):
+                print(f"comment - [{token.lineno}-{token.end_lineno}]")
+    if isinstance(token, ast_comments.Comment):
+        print(f"comment - [{token.lineno}-{token.end_lineno}]")
 
 
 def read_init_fields(init: FunctionDef) -> None:
@@ -46,7 +54,7 @@ def read_body(body_holder: Union[ClassDef, Module]) -> None:
 def get_module(path: Path):
     with open(path, mode='r', encoding='utf-8-sig') as f:
         content = f.read()
-    return ast.parse(content)
+    return ast_comments.parse(content)
 
 def main():
     args = sys.argv[1:]
@@ -70,12 +78,14 @@ def main():
 
 def main_debug():
     file = r"C:\Repositories\MetinSpeechToData\Python\bot_states\fight.py"
+    file = r"simple.py"
 
-    module = get_module(Path(file))
-    read_body(module)
+    with open(file, mode='r', encoding='utf-8-sig') as f:
+        content = f.read()
+    module = parse_module(content)
 
 
-DEBUG = True
+DEBUG = False
 if __name__ == '__main__':
     if DEBUG:
         main_debug()

@@ -2,5 +2,6 @@
   "class",
   "function",
   "property",
-  "field"
+  "field",
+  "comment"
 ]
