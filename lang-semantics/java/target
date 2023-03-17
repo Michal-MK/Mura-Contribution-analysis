@@ -1,1 +1,1 @@
-java -jar checkstyle-10.8.1-all.jar
+java -jar JavaAST-1.0.jar

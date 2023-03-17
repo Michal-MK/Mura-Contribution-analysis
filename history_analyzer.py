@@ -36,6 +36,10 @@ class CommitRange:
         self.hist = hist
         self.repo = repo
 
+    def __iter__(self):
+        for commit in self.compute_path():
+            yield commit
+
     def compute_path(self) -> Deque[str]:
         """
         Compute the path from <current_commit_hash> to <historical_commit_hash> in the <repo>
@@ -231,7 +235,7 @@ class Ownership:
             self.changes[0] = author
             return
 
-        assert hunk.change_start >= 0 and hunk.change_start <= self._line_count + 1 # +1 for a possibly missing new line
+        assert hunk.change_start >= 0 and hunk.change_start <= self._line_count + 1  # +1 for a possibly missing new line
 
         if hunk.change_len > 0 and hunk.mode != 'A':
             for i in range(hunk.change_len):
@@ -256,6 +260,13 @@ class Ownership:
 
     def __str__(self):
         return f"Ownership(lines={self.line_count}, changes={self.changes})"
+
+
+class Percentage:
+    # Tuple[Dict[str, List[Tuple[str, float]]], Dict[str, float]]:
+    def __init__(self, file_per_contributor: Dict[str, List[Tuple[str, float]]], global_contribution: DefaultDict[str, float]):
+        self.file_per_contributor = file_per_contributor
+        self.global_contribution = global_contribution
 
 
 def get_file_changes(commit_hash: str, repo: Repo) -> Dict[FileName, Change]:
@@ -307,7 +318,7 @@ def get_file_changes(commit_hash: str, repo: Repo) -> Dict[FileName, Change]:
     return ret
 
 
-def calculate_percentage(result: AnalysisResult) -> Tuple[Dict[str, List[Tuple[str, float]]], Dict[str, float]]:
+def calculate_percentage(result: AnalysisResult) -> Percentage:
     ret: Dict[str, List[Tuple[str, float]]] = {}
     author_total: DefaultDict[str, int] = defaultdict(lambda: 0)
     lines_total = 0
@@ -323,12 +334,12 @@ def calculate_percentage(result: AnalysisResult) -> Tuple[Dict[str, List[Tuple[s
         for author, lines in intermediate.items():
             ret[key].append((author, lines / file_lines))
 
-    totals = {}
+    totals: DefaultDict = defaultdict(lambda: 0)
 
     for author, authors_total_lines in author_total.items():
         totals[author] = authors_total_lines / lines_total
 
-    return ret, totals
+    return Percentage(ret, totals)
 
 
 def construct_unmerged_tree(unmerged_commits: Set[str], all_commits: Set[str], repo: Repo) -> Dict[str, List[str]]:

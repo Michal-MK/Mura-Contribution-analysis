@@ -103,10 +103,10 @@ class HistoryAnalyzerTest(unittest.TestCase):
         c_range = CommitRange('HEAD', 'ROOT', repo)
         result = c_range.analyze()
 
-        res = calculate_percentage(result)
+        percentage = calculate_percentage(result)
 
-        self.assertTrue(isclose(res[1]['Michal-MK'], 78 / 85))
-        self.assertTrue(isclose(res[1]['Other Name'], 7 / 85))
+        self.assertTrue(isclose(percentage.global_contribution['Michal-MK'], 78 / 85))
+        self.assertTrue(isclose(percentage.global_contribution['Other Name'], 7 / 85))
 
     def test_find_unmerged(self):
         repo = git.Repo(TEST_REPO_UNMERGED)

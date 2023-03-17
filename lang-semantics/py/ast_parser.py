@@ -59,7 +59,7 @@ def get_module(path: Path):
 def main():
     args = sys.argv[1:]
     if len(args) < 2:
-        print("Usage: python3 semantic_analysis.py <path_to_declarations> <path_to_file>")
+        print("Usage: python3 ast_parser.py <path_to_declarations> <path_to_file>")
         exit(1)
 
     declaration_path = Path(args[0])

@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Union, List, Optional, Literal
+from typing import Union, List, Optional, Literal, Set
 
 import git
 from git import Repo, Commit
@@ -20,12 +20,14 @@ class FileGroup:
             extensions.append(file.suffix)
         return max(set(extensions), key=extensions.count)
 
+
 def set_repo(repo: Union[str, Repo]) -> None:
     global REPO
     if isinstance(repo, str):
         REPO = Repo(repo)
     else:
         REPO = repo
+
 
 def first_commit(commit: Commit) -> Commit:
     while commit.parents:
@@ -36,10 +38,12 @@ def first_commit(commit: Commit) -> Commit:
 def file_contents(commit: Commit, file: str) -> str:
     return REPO.git.show(f'{commit.hexsha}:{file}')
 
-def commit_summary(commit : Commit) -> None:
+
+def commit_summary(commit: Commit) -> None:
     print(f"There are total of {commit.stats.total['files']} changed files")
     print(f"Author: {commit.author}")
     print(f"Message: {commit.message}")
+
 
 def stats_for_contributor(contributor: str) -> None:
     insertions = 0
@@ -54,6 +58,7 @@ def stats_for_contributor(contributor: str) -> None:
             deletions += commit.stats.total['deletions']
     print(f"Total insertions: {insertions}")
     print(f"Total deletions: {deletions}")
+
 
 def get_files_with_flag(commit: Commit, flag: Literal["A", "R", "D", "M"]) -> List[str]:
     print(f"Files with flag {flag}:")
@@ -71,6 +76,7 @@ def get_files_with_flag(commit: Commit, flag: Literal["A", "R", "D", "M"]) -> Li
         if diff.change_type == flag:
             files.append(diff.b_path)
     return files
+
 
 def try_checkout(commit_hash: str, force: bool = False) -> None:
     try:
@@ -160,3 +166,56 @@ def filter_related_groups(groups: List[FileGroup]) -> List[FileGroup]:
 
 def repo_p(file_name: str, repo: Repo):
     return os.path.join(repo.common_dir, '..', file_name)
+
+
+class Contributor:
+    def __init__(self, name: str, email: str):
+        self.name = name
+        self.email = email
+        self.aliases: List['Contributor'] = []
+
+    def __eq__(self, other):
+        return isinstance(other, Contributor) and other.name == self.name and other.email == self.email
+
+    def __hash__(self):
+        return hash(self.name) + hash(self.email)
+
+    def __str__(self):
+        return f"{self.name} <{self.email}> ({[str(a) for a in self.aliases]})"
+
+    def __repr__(self):
+        return self.__str__()
+
+
+def get_contributors(match_on_name=True, match_on_email=True) -> List[Contributor]:
+    """
+    Get a list of all contributors
+
+    :return: A list of all contributors
+    """
+    contributors: Set[Contributor] = set()
+    for commit in REPO.iter_commits():
+        contributors.add(Contributor(commit.author.name, commit.author.email))
+
+    matched_contributors: List[Contributor] = []
+    for it in contributors:
+        matched = False
+        for other in matched_contributors:
+            if it.name == other.name and it.email == other.email:
+                continue
+            if it.name == other.name or it.email == other.email and (match_on_name and match_on_email):
+                other.aliases.append(it)
+                matched = True
+                break
+            if it.name == other.name and match_on_name and not match_on_email:
+                other.aliases.append(it)
+                matched = True
+                break
+            if it.email == other.email and match_on_email and not match_on_name:
+                other.aliases.append(it)
+                matched = True
+                break
+
+        if not matched:
+            matched_contributors.append(it)
+    return matched_contributors

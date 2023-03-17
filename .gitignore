@@ -5,6 +5,7 @@ venv
 .vs
 bin
 obj
+lang-semantics/java/java-ast/target
 
 repositories
 repositories_remote

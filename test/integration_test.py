@@ -16,13 +16,14 @@ class IntegrationTest(unittest.TestCase):
         set_repo(repo)
         # TODO branch and tag name support
         range = CommitRange("HEAD", "c1c8eb0afaa9cec949b1601720d66fe4b6bcce31", repo)
+
         result = range.analyze()
         tracked_files = get_tracked_files(repo)
         weights = []
         for tf in tracked_files:
             sem_w = compute_semantic_weight_grouped(tf)
             weights.append(sem_w)
-        merge_results(result, tracked_files, weights)
+        merge_results(repo, range, result, tracked_files, weights)
 
 
 if __name__ == '__main__':
