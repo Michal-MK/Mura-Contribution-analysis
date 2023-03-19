@@ -111,5 +111,5 @@ for fsi in os.listdir('.'):
 #  - # of lines added by contributor 100% ownership
 #  - # of lines modified by contributor % of line -> % ownership
 # timestamp of a commit
-# rules
+# rule_data
 #

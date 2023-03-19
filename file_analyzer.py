@@ -66,7 +66,7 @@ def load_weight_map(file_path: Path) -> SyntacticWeightModel:
     suffix = file_path.suffix.lstrip('.')
     if suffix not in loaded_weight_maps:
         ret = SyntacticWeightModel()
-        with open(os.path.join(Path(__file__).parent, "weight-maps", suffix + ".json"), 'r') as f:
+        with open(os.path.join(Path(__file__).parent, "lang-syntax", suffix + ".json"), 'r') as f:
             ret.load(f)
         return ret
     else:
@@ -77,7 +77,7 @@ def has_weight_map(file: Path) -> bool:
     if file.is_dir():
         return False
     suffix = file.suffix.lstrip('.')
-    return os.path.isfile(os.path.join(Path(__file__).parent, "weight-maps", suffix + ".json"))
+    return os.path.isfile(os.path.join(Path(__file__).parent, "lang-syntax", suffix + ".json"))
 
 
 def compute_file_weight(file: Path) -> FileWeight:

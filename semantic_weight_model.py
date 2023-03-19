@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Dict
 
+from fs_access import parse_model_content
+
 WEIGHT_MODELS: Dict[str, 'SemanticWeightModel'] = {}
 
 
@@ -32,23 +34,6 @@ class SemanticWeightModel:
         base_values = map(lambda x: self.__dict__[x], bases)
         return sum(base_values) / len(bases)
 
-
-    @staticmethod
-    def _parse_file(weight_model: 'SemanticWeightModel', file: Path) -> 'SemanticWeightModel':
-        with open(file) as f:
-            for line in f:
-                if line.startswith('#') or not line.strip():
-                    continue
-
-                trimmed = line.strip()
-                split = trimmed.split('=')
-                key = split[0].strip()
-                value = float(split[1].strip())
-
-                weight_model.__dict__[key] = value
-
-        return weight_model
-
     @staticmethod
     def parse(file: Path) -> 'SemanticWeightModel':
         extension = file.suffix.lstrip('.')
@@ -58,12 +43,12 @@ class SemanticWeightModel:
         weight_model = SemanticWeightModel()
         base_weights = Path(__file__).parent / "lang-semantics" / "semantic_weights"
 
-        weight_model = SemanticWeightModel._parse_file(weight_model, base_weights)
+        weight_model = parse_model_content(weight_model, base_weights)
 
         specific_weights = base_weights.parent / extension / "semantic_weights"
 
         if specific_weights.exists():
-            weight_model = SemanticWeightModel._parse_file(weight_model, specific_weights)
+            weight_model = parse_model_content(weight_model, specific_weights)
 
         WEIGHT_MODELS[extension] = weight_model
         return weight_model

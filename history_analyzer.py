@@ -2,11 +2,9 @@ import copy
 import re
 from collections import deque, defaultdict
 from typing import List, Dict, Tuple, Deque, Optional, DefaultDict, Set
+from lib import Percentage, first_commit, repo_p
 
-import git
 from git import Repo
-
-import lib
 
 FileName = str
 AuthorName = str
@@ -48,7 +46,19 @@ class CommitRange:
         if self.head.lower() == 'head':
             self.head = self.repo.head.commit.hexsha
         if self.hist.lower() == 'root':
-            self.hist = lib.first_commit(self.repo.commit(self.head)).hexsha
+            self.hist = first_commit(self.repo.commit(self.head)).hexsha
+        branches = self.repo.git.execute(["git", "show-ref", "--heads", "--tags"])
+
+        merged_marked_commits = [y.split() for y in branches.splitlines()]
+        marked_commits = [(str(x[0]), str(x[1]).replace('refs/heads/', '').replace('refs/tags/', ''))
+                                                 for x in merged_marked_commits]
+
+        for mk in marked_commits:
+            if mk[1] == self.head:
+                self.head = mk[0]
+            if mk[1] == self.hist:
+                self.hist = mk[0]
+
         c_range = f"{self.head}...{self.hist}"
         output = self.repo.git.execute(["git", "rev-list", "--topo-order", "--ancestry-path", "--reverse", c_range])
         assert isinstance(output, str)
@@ -72,7 +82,7 @@ class CommitRange:
         status, sout, serr = self.repo.git.execute(cmd, with_extended_output=True)
         if status == 0:
             # Obtain the previous version of the file as a base
-            file_path = lib.repo_p(file_name, self.repo)
+            file_path = repo_p(file_name)
             self.checkout_file_from(commit_hash, file_path)
             with open(file_path, 'r', encoding='utf-8-sig') as f:
                 content = f.read()
@@ -260,13 +270,6 @@ class Ownership:
 
     def __str__(self):
         return f"Ownership(lines={self.line_count}, changes={self.changes})"
-
-
-class Percentage:
-    # Tuple[Dict[str, List[Tuple[str, float]]], Dict[str, float]]:
-    def __init__(self, file_per_contributor: Dict[str, List[Tuple[str, float]]], global_contribution: DefaultDict[str, float]):
-        self.file_per_contributor = file_per_contributor
-        self.global_contribution = global_contribution
 
 
 def get_file_changes(commit_hash: str, repo: Repo) -> Dict[FileName, Change]:

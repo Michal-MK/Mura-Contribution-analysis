@@ -1,0 +1,2 @@
+full_ownership_min_threshold = 0.8
+ownership_min_threshold = 0.2

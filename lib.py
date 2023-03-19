@@ -1,9 +1,14 @@
-import os
-from pathlib import Path
-from typing import Union, List, Optional, Literal, Set
+from __future__ import annotations
 
-import git
+import os
+import typing
+from pathlib import Path
+from typing import Union, List, Optional, Literal, Set, Dict, Tuple, DefaultDict
+
 from git import Repo, Commit
+
+if typing.TYPE_CHECKING:
+    from configuration import Configuration
 
 REPO: Repo
 ignore_list = os.path.join(Path(__file__).parent, "data", "ignore-list.txt")
@@ -100,7 +105,7 @@ def _ignored_files() -> List[str]:
     return ret
 
 
-def get_tracked_files(project_root: Union[Path, git.Repo]) -> List[FileGroup]:
+def get_tracked_files(project_root: Union[Path, Repo]) -> List[FileGroup]:
     """
     Find all files that are related, relative to the project root
     :
@@ -109,8 +114,10 @@ def get_tracked_files(project_root: Union[Path, git.Repo]) -> List[FileGroup]:
     """
     ret: List[FileGroup] = []
 
-    if isinstance(project_root, git.Repo):
-        project_root = Path(project_root.working_dir)
+    if isinstance(project_root, Repo):
+        repo_dir = project_root.working_dir
+        assert repo_dir is not None
+        project_root = Path(repo_dir)
 
     for root, dirs, files in os.walk(project_root):
         to_remove = []
@@ -164,8 +171,8 @@ def filter_related_groups(groups: List[FileGroup]) -> List[FileGroup]:
     return ret
 
 
-def repo_p(file_name: str, repo: Repo):
-    return os.path.join(repo.common_dir, '..', file_name)
+def repo_p(file_name: str):
+    return Path(os.path.join(REPO.common_dir, '..', file_name))
 
 
 class Contributor:
@@ -185,6 +192,14 @@ class Contributor:
 
     def __repr__(self):
         return self.__str__()
+
+
+class Percentage:
+    # Tuple[Dict[str, List[Tuple[str, float]]], Dict[str, float]]:
+    def __init__(self, file_per_contributor: Dict[str, List[Tuple[str, float]]],
+                 global_contribution: DefaultDict[str, float]):
+        self.file_per_contributor = file_per_contributor
+        self.global_contribution = global_contribution
 
 
 def get_contributors(match_on_name=True, match_on_email=True) -> List[Contributor]:
@@ -219,3 +234,45 @@ def get_contributors(match_on_name=True, match_on_email=True) -> List[Contributo
         if not matched:
             matched_contributors.append(it)
     return matched_contributors
+
+
+def find_contributor(contributors: List[Contributor], author: str) -> Contributor:
+    for contributor in contributors:
+        if author == contributor.name:
+            return contributor
+        if author in contributor.aliases:
+            return contributor
+        if author in list(map(lambda x: x.name, contributor.aliases)):
+            return contributor
+    raise ValueError('Contributor not found')
+
+
+class ContributionDistribution:
+    def __init__(self, file: str, percentage: float):
+        self.file = file
+        self.percentage = percentage
+
+    def __iter__(self):
+        yield self.file
+        yield self.percentage
+
+
+def compute_file_ownership(percentage: Percentage, contributors: List[Contributor], config: Configuration) \
+        -> Dict[Contributor, List[ContributionDistribution]]:
+    ret: Dict[Contributor, List[ContributionDistribution]] = {}
+    for file, percentages in percentage.file_per_contributor.items():
+        for contributor, contrib_percent in percentages:
+            if contributor == '' or contributor == '_':
+                # No author name comes from incomplete git history (starting from a certain commit)
+                # Placeholder name '_' indicates 0 line index (no contribution) and trailing newline
+                continue
+            contrib = find_contributor(contributors, contributor)
+            if contrib not in ret:
+                ret[contrib] = []
+            if contrib_percent > config.full_ownership_min_threshold:
+                ret[contrib].append(ContributionDistribution(file, 1))
+            elif contrib_percent < config.ownership_min_threshold:
+                continue
+            else:
+                ret[contrib].append(ContributionDistribution(file, contrib_percent))
+    return ret
