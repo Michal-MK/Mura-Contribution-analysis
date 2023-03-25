@@ -9,3 +9,4 @@ lang-semantics/java/java-ast/target
 
 repositories
 repositories_remote
+/test/environment_local.py
