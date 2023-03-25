@@ -1,6 +1,6 @@
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Iterator
 
 from lib import FileGroup
 from semantic_weight_model import SemanticWeightModel
@@ -9,14 +9,33 @@ LANG_SEMANTICS_PATH = Path(__file__).parent / "lang-semantics"
 
 SEMANTIC_ANALYZERS: Dict[str, 'LangSemantics'] = {}
 
-
-class LangStructure:
-    def __init__(self, kind: str, parent: Optional['LangStructure'], children: List['LangStructure']) -> None:
+class LangElement:
+    def __init__(self, kind: str, parent: Optional['LangElement'], children: List['LangElement']) -> None:
         self.kind = kind
         self.parent = parent
         self.children = children
         self.start = 0
         self.end = 0
+
+    @property
+    def classes(self) -> Iterator['LangElement']:
+        return filter(lambda x: x.kind == "class", [self, *self.children])
+
+    @property
+    def functions(self) -> Iterator['LangElement']:
+        return filter(lambda x: x.kind == "function", self.children)
+
+    @property
+    def fields(self) -> Iterator['LangElement']:
+        return filter(lambda x: x.kind == "field", self.children)
+
+    @property
+    def properties(self) -> Iterator['LangElement']:
+        return filter(lambda x: x.kind == "property", self.children)
+
+    @property
+    def comments(self) -> Iterator['LangElement']:
+        return filter(lambda x: x.kind == "comment", self.children)
 
     def in_range(self, start: int, end: int) -> bool:
         return self.start <= start and self.end >= end
@@ -40,14 +59,14 @@ class LangStructure:
 
         weight += base_length_weight * total_length_multiplier
 
-        class_count = len(list(filter(lambda x: x.kind == 'class', self.children)))
+        class_count = len(list(self.classes))
 
         if class_count > weight_model.class_upper_limit:
             class_count_multiplier = weight_model.class_upper_limit_multiplier - 0.2 * (class_count - 1)
 
         weight += base_class_weight * class_count_multiplier
 
-        function_count = len(list(filter(lambda x: x.kind == 'function', self.children)))
+        function_count = len(list(self.functions))
 
         if function_count > weight_model.function_upper_limit:
             function_count_multiplier = weight_model.function_upper_limit_multiplier - 0.05 * (function_count - 20)
@@ -56,7 +75,7 @@ class LangStructure:
 
         weight += base_function_weight * function_count_multiplier
 
-        property_or_field_count = len(list(filter(lambda x: x.kind == 'property' or x.kind == 'field', self.children)))
+        property_or_field_count = len(list(self.fields) + list(self.properties))
 
         if property_or_field_count > weight_model.property_field_upper_limit:
             property_or_field_count_multiplier = weight_model.property_field_upper_limit_multiplier - 0.05 * (
@@ -78,17 +97,17 @@ class LangSemantics:
         self.lang_dir = lang_dir
         self.tool = tool_executable
 
-    def analyze(self, file: Path) -> Tuple[SemanticWeightModel, float]:
+    def analyze(self, file: Path) -> Tuple[SemanticWeightModel, LangElement]:
         args = [*self.tool.split(), str(self.lang_dir.parent / "declarations.json"), str(file)]
         process = subprocess.run(args, check=True, cwd=self.lang_dir, stdout=subprocess.PIPE, shell=True)
         output = process.stdout.decode("utf-8")
         lines = output.splitlines(keepends=True)
         structure = self._parse_structure(lines)
         model = SemanticWeightModel.parse(file)
-        return model, structure.compute_weight(model)
+        return model, structure
 
-    def _parse_structure(self, lines: List[str]) -> LangStructure:
-        root = parent = LangStructure('root', None, [])
+    def _parse_structure(self, lines: List[str]) -> LangElement:
+        root = parent = LangElement('root', None, [])
         for line in lines:
             split = line.split('-', maxsplit=1)
             kind = split[0].strip()
@@ -96,7 +115,7 @@ class LangSemantics:
             start = int(ranges[0])
             end = int(ranges[1])
             if kind == 'class':
-                _class = LangStructure(kind, parent, [])
+                _class = LangElement(kind, parent, [])
                 _class.start = start
                 _class.end = end
                 if root.end < end:
@@ -107,7 +126,7 @@ class LangSemantics:
                     root.children.append(_class)
                     parent = _class
             if kind in ['function', 'property', 'field']:
-                _def = LangStructure(kind, parent, [])
+                _def = LangElement(kind, parent, [])
                 _def.start = start
                 _def.end = end
                 if root.end < end:
@@ -120,14 +139,14 @@ class LangSemantics:
         return root
 
 
-def compute_semantic_weight(file: Path) -> Tuple[SemanticWeightModel, float]:
+def compute_semantic_weight(file: Path) -> Tuple[SemanticWeightModel, 'LangElement']:
     semantics = load_semantic_parser(file)
     assert semantics is not None, f"No semantic parser for {file}"
 
     return semantics.analyze(file)
 
 
-def compute_semantic_weight_grouped(file_group: FileGroup) -> List[Tuple[SemanticWeightModel, float]]:
+def compute_semantic_weight_grouped(file_group: FileGroup) -> List[Tuple[SemanticWeightModel, 'LangElement']]:
     ret = []
     for file in file_group.files:
         abs_file = file.absolute()
@@ -135,6 +154,8 @@ def compute_semantic_weight_grouped(file_group: FileGroup) -> List[Tuple[Semanti
         if has_semantic_parser(abs_file):
             sem_w = compute_semantic_weight(abs_file)
             ret.append(sem_w)
+        else:
+            ret.append((SemanticWeightModel(), LangElement('root', None, [])))
     return ret
 
 
@@ -163,4 +184,6 @@ def load_semantic_parser(file: Path) -> Optional[LangSemantics]:
 
     full_path = lang_folder.absolute()
 
-    return LangSemantics(full_path, executable)
+    semantics = LangSemantics(full_path, executable)
+    SEMANTIC_ANALYZERS[extension] = semantics
+    return semantics

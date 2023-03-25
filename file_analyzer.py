@@ -2,7 +2,7 @@ import os
 from typing import List, Dict
 from pathlib import Path
 
-from semantic_analysis import compute_semantic_weight
+from semantic_analysis import compute_semantic_weight, LangElement
 from semantic_weight_model import SemanticWeightModel
 from syntactic_weight_model import SyntacticWeightModel
 
@@ -30,11 +30,11 @@ class BlankLineHandler:
 
 class FileWeight:
     def __init__(self, file: Path, line_weights: List[float], weight_model: SemanticWeightModel,
-                 semantic_weight: float):
+                 semantic_structure: 'LangElement'):
         self.file = file
         self.line_weights = line_weights
         self.weight_model = weight_model
-        self.semantic_weight = semantic_weight
+        self.semantic_structure = semantic_structure
 
     @property
     def total_line_weight(self):
@@ -47,6 +47,10 @@ class FileWeight:
     @property
     def final_weight(self):
         return self.syntactic_weight + self.semantic_weight
+
+    @property
+    def semantic_weight(self):
+        return self.semantic_structure.compute_weight(self.weight_model)
 
     @property
     def average_line_weight(self):

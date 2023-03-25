@@ -4,7 +4,7 @@ from git import Repo
 
 from lib import ContributionDistribution, Contributor, set_repo
 from rules import parse_rules
-from test.environment import TURTLE_GRAPHICS_REPO
+from environment_local import TURTLE_GRAPHICS_REPO
 
 
 class RuleTests(unittest.TestCase):

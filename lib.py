@@ -7,8 +7,10 @@ from typing import Union, List, Optional, Literal, Set, Dict, Tuple, DefaultDict
 
 from git import Repo, Commit
 
+
 if typing.TYPE_CHECKING:
     from configuration import Configuration
+    from history_analyzer import CommitRange
 
 REPO: Repo
 ignore_list = os.path.join(Path(__file__).parent, "data", "ignore-list.txt")
@@ -172,7 +174,7 @@ def filter_related_groups(groups: List[FileGroup]) -> List[FileGroup]:
 
 
 def repo_p(file_name: str):
-    return Path(os.path.join(REPO.common_dir, '..', file_name))
+    return Path(os.path.join(REPO.common_dir, '..', file_name)).resolve()
 
 
 class Contributor:
@@ -196,20 +198,25 @@ class Contributor:
 
 class Percentage:
     # Tuple[Dict[str, List[Tuple[str, float]]], Dict[str, float]]:
-    def __init__(self, file_per_contributor: Dict[str, List[Tuple[str, float]]],
+    def __init__(self, file_per_contributor: Dict[Path, List[Tuple[str, float]]],
                  global_contribution: DefaultDict[str, float]):
         self.file_per_contributor = file_per_contributor
         self.global_contribution = global_contribution
 
 
-def get_contributors(match_on_name=True, match_on_email=True) -> List[Contributor]:
+def get_contributors(range:Optional[CommitRange]=None, match_on_name=True, match_on_email=True) -> List[Contributor]:
     """
     Get a list of all contributors
 
     :return: A list of all contributors
     """
     contributors: Set[Contributor] = set()
-    for commit in REPO.iter_commits():
+    if range is not None:
+        commits = [REPO.commit(x) for x in range]
+    else:
+        commits = [x for x in REPO.iter_commits()]
+
+    for commit in commits:
         contributors.add(Contributor(commit.author.name, commit.author.email))
 
     matched_contributors: List[Contributor] = []

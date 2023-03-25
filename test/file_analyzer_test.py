@@ -1,7 +1,6 @@
 import unittest
 from pathlib import Path
 
-from environment import TURTLE_GRAPHICS_REPO
 from file_analyzer import compute_file_weight
 
 repos_path = "../repositories"

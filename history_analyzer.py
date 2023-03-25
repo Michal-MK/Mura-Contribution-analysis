@@ -1,16 +1,16 @@
 import copy
 import re
 from collections import deque, defaultdict
+from pathlib import Path
 from typing import List, Dict, Tuple, Deque, Optional, DefaultDict, Set
 from lib import Percentage, first_commit, repo_p
 
 from git import Repo
 
-FileName = str
 AuthorName = str
 AuthorPtr = int
 OwnershipHistory = List[List[AuthorName]]
-AnalysisResult = Dict[FileName, 'Ownership']
+AnalysisResult = Dict[Path, 'Ownership']
 
 ROOT_HASH = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 
@@ -47,9 +47,10 @@ class CommitRange:
             self.head = self.repo.head.commit.hexsha
         if self.hist.lower() == 'root':
             self.hist = first_commit(self.repo.commit(self.head)).hexsha
-        branches = self.repo.git.execute(["git", "show-ref", "--heads", "--tags"])
+        marks = self.repo.git.execute(["git", "show-ref", "--heads", "--tags"])
+        assert isinstance(marks, str)
 
-        merged_marked_commits = [y.split() for y in branches.splitlines()]
+        merged_marked_commits = [y.split() for y in marks.splitlines()]
         marked_commits = [(str(x[0]), str(x[1]).replace('refs/heads/', '').replace('refs/tags/', ''))
                                                  for x in merged_marked_commits]
 
@@ -77,7 +78,7 @@ class CommitRange:
         self.repo.git.checkout(commit.hexsha, '--', file_name)
 
     def populate_previously_unseen_file(self, change: 'Change', commit_hash: str, file_name: str,
-                                        ret: Dict[FileName, 'Ownership']) -> None:
+                                        ret: Dict[Path, 'Ownership']) -> None:
         cmd = ['git', 'cat-file', '-e', change.hunks[0].prev_file_hexsha]
         status, sout, serr = self.repo.git.execute(cmd, with_extended_output=True)
         if status == 0:
@@ -86,9 +87,9 @@ class CommitRange:
             self.checkout_file_from(commit_hash, file_path)
             with open(file_path, 'r', encoding='utf-8-sig') as f:
                 content = f.read()
-            ret[file_name] = Ownership(len(content.splitlines()))
+            ret[file_path] = Ownership(len(content.splitlines()))
             for hunk in change.hunks:
-                ret[file_name].add_change(hunk, change.author)
+                ret[file_path].add_change(hunk, change.author)
 
     def analyze(self) -> AnalysisResult:
         """
@@ -98,7 +99,7 @@ class CommitRange:
         """
         path = self.compute_path()
 
-        ret: Dict[FileName, Ownership] = {}
+        ret: Dict[Path, Ownership] = {}
 
         for commit_hash in path:
             # print(f"Analyzing commit {commit_hash} ({commit.message.rstrip()}) BY: {commit.author}")
@@ -272,7 +273,7 @@ class Ownership:
         return f"Ownership(lines={self.line_count}, changes={self.changes})"
 
 
-def get_file_changes(commit_hash: str, repo: Repo) -> Dict[FileName, Change]:
+def get_file_changes(commit_hash: str, repo: Repo) -> Dict[Path, Change]:
     """
     Get the ownership of each file in the commit with the hash <commit_hash>
     :param commit_hash: The hash of the commit to analyze
@@ -296,7 +297,7 @@ def get_file_changes(commit_hash: str, repo: Repo) -> Dict[FileName, Change]:
         matches = HUNK_HEADER_PATTERN.findall(unified_diff_str)
         author = commit.author.name
         assert author is not None, f"Author name is None for commit {commit_hash} ({commit.message})"
-        actual_path = diff.b_path if diff.b_path is not None else diff.a_path
+        actual_path = repo_p(diff.b_path) if diff.b_path is not None else repo_p(diff.a_path)
         if diff.b_path is None:
             ret[actual_path] = Change(author)
             mode = "D"
@@ -322,12 +323,12 @@ def get_file_changes(commit_hash: str, repo: Repo) -> Dict[FileName, Change]:
 
 
 def calculate_percentage(result: AnalysisResult) -> Percentage:
-    ret: Dict[str, List[Tuple[str, float]]] = {}
+    ret: Dict[Path, List[Tuple[str, float]]] = {}
     author_total: DefaultDict[str, int] = defaultdict(lambda: 0)
     lines_total = 0
 
-    for key, val in result.items():
-        ret[key] = []
+    for path, val in result.items():
+        ret[path] = []
         intermediate: DefaultDict[str, int] = defaultdict(lambda: 0)
         for author in val.changes[1:]:
             intermediate[author] = intermediate[author] + 1
@@ -335,7 +336,7 @@ def calculate_percentage(result: AnalysisResult) -> Percentage:
             lines_total += 1
         file_lines = len(val.changes[1:])
         for author, lines in intermediate.items():
-            ret[key].append((author, lines / file_lines))
+            ret[path].append((author, lines / file_lines))
 
     totals: DefaultDict = defaultdict(lambda: 0)
 

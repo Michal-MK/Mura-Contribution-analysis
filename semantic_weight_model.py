@@ -9,6 +9,7 @@ WEIGHT_MODELS: Dict[str, 'SemanticWeightModel'] = {}
 class SemanticWeightModel:
 
     def __init__(self):
+        self.is_empty: bool = True
         self.property_field_lower_limit_multiplier: float = 0.0
         self.property_field_lower_limit: float = 0.0
         self.property_field_upper_limit_multiplier: float = 0.0
@@ -49,6 +50,8 @@ class SemanticWeightModel:
 
         if specific_weights.exists():
             weight_model = parse_model_content(weight_model, specific_weights)
+
+        weight_model.is_empty = False
 
         WEIGHT_MODELS[extension] = weight_model
         return weight_model

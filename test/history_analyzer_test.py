@@ -1,17 +1,18 @@
 import datetime
 import unittest
 from math import isclose
+from pathlib import Path
 from typing import List
 
 import git
 
 import lib
-from environment import TURTLE_GRAPHICS_REPO
+from environment_local import TURTLE_GRAPHICS_REPO
 from history_analyzer import get_file_changes, AuthorName, CommitRange, calculate_percentage
 
-TEST_REPO2 = "..\\repositories\\single_file"
-TEST_REPO_UNMERGED = "..\\repositories\\unmerged"
-TEST_REPO_UNMERGED_MULTIPLE = "..\\repositories\\unmerged_multiple"
+TEST_REPO2 = Path("..\\repositories\\single_file")
+TEST_REPO_UNMERGED = Path("..\\repositories\\unmerged")
+TEST_REPO_UNMERGED_MULTIPLE = Path("..\\repositories\\unmerged_multiple")
 
 
 def by(section: List[AuthorName], author: AuthorName):
@@ -19,10 +20,16 @@ def by(section: List[AuthorName], author: AuthorName):
 
 
 class HistoryAnalyzerTest(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.nas_model = (TEST_REPO2 / "NasModel.cs").absolute().resolve()
+
     def test_compute_path(self):
         hist = 'cdce762b1f46fc20c1e15c27c7874925ff830ab4'
         head = '2dee9480a4d9aff4c006467d4c4a61b7ff7b9871'
+
         repo = git.Repo(TURTLE_GRAPHICS_REPO)
+        lib.set_repo(repo)
 
         c_range = CommitRange(head, hist, repo)
 
@@ -37,15 +44,16 @@ class HistoryAnalyzerTest(unittest.TestCase):
     def test_get_ownership(self):
         c_hash = '9d5b319e1302d4bfa79b44c639b1c7de82d6a9c7'
         repo = git.Repo(TEST_REPO2)
+        lib.set_repo(repo)
         ownership = get_file_changes(c_hash, repo)
 
-        self.assertTrue(len(ownership['NasModel.cs'].hunks) == 3)
-        self.assertTrue(ownership['NasModel.cs'].hunks[0].change_start == 40)
-        self.assertTrue(ownership['NasModel.cs'].hunks[0].change_len == 1)
-        self.assertTrue(ownership['NasModel.cs'].hunks[1].change_start == 51)
-        self.assertTrue(ownership['NasModel.cs'].hunks[1].change_len == 1)
-        self.assertTrue(ownership['NasModel.cs'].hunks[2].change_start == 75)
-        self.assertTrue(ownership['NasModel.cs'].hunks[2].change_len == 1)
+        self.assertTrue(len(ownership[self.nas_model].hunks) == 3)
+        self.assertTrue(ownership[self.nas_model].hunks[0].change_start == 40)
+        self.assertTrue(ownership[self.nas_model].hunks[0].change_len == 1)
+        self.assertTrue(ownership[self.nas_model].hunks[1].change_start == 51)
+        self.assertTrue(ownership[self.nas_model].hunks[1].change_len == 1)
+        self.assertTrue(ownership[self.nas_model].hunks[2].change_start == 75)
+        self.assertTrue(ownership[self.nas_model].hunks[2].change_len == 1)
 
     def test_analyze_all_changes_by_me_first_commit(self):
         repo = git.Repo(TEST_REPO2)
@@ -53,11 +61,11 @@ class HistoryAnalyzerTest(unittest.TestCase):
         lib.try_checkout('e4b73d4152c5e9e6c854fbf1df99011bf16e3eb9', True)
         c_range = CommitRange('HEAD', 'ROOT', repo)
         result = c_range.analyze()
-        self.assertTrue(result['NasModel.cs'].line_count == 75)
-        self.assertTrue(result['NasModel.cs'].changes[0] == '')
+        self.assertTrue(result[self.nas_model].line_count == 75)
+        self.assertTrue(result[self.nas_model].changes[0] == '')
 
-        num_changes_done_by_me = len(list(filter(lambda x: x == 'Michal-MK', result['NasModel.cs'].changes)))
-        self.assertTrue(num_changes_done_by_me == result['NasModel.cs'].line_count)
+        num_changes_done_by_me = len(list(filter(lambda x: x == 'Michal-MK', result[self.nas_model].changes)))
+        self.assertTrue(num_changes_done_by_me == result[self.nas_model].line_count)
 
     def test_analyze_all_changes_by_me_early_commit(self):
         repo = git.Repo(TEST_REPO2)
@@ -65,11 +73,11 @@ class HistoryAnalyzerTest(unittest.TestCase):
         lib.try_checkout('9d5b319e1302d4bfa79b44c639b1c7de82d6a9c7', True)
         c_range = CommitRange('HEAD', 'ROOT', repo)
         result = c_range.analyze()
-        self.assertTrue(result['NasModel.cs'].line_count == 78)
-        self.assertTrue(result['NasModel.cs'].changes[0] == '')
+        self.assertTrue(result[self.nas_model].line_count == 78)
+        self.assertTrue(result[self.nas_model].changes[0] == '')
 
-        num_changes_done_by_me = len(list(filter(lambda x: x == 'Michal-MK', result['NasModel.cs'].changes)))
-        self.assertTrue(num_changes_done_by_me == result['NasModel.cs'].line_count)
+        num_changes_done_by_me = len(list(filter(lambda x: x == 'Michal-MK', result[self.nas_model].changes)))
+        self.assertTrue(num_changes_done_by_me == result[self.nas_model].line_count)
 
     def test_analyze_all_changes_by_me(self):
         repo = git.Repo(TEST_REPO2)
@@ -77,11 +85,11 @@ class HistoryAnalyzerTest(unittest.TestCase):
         lib.try_checkout('96192b7ac9b3484a6e647519fb67f0be620f0bd5', True)
         c_range = CommitRange('HEAD', 'ROOT', repo)
         result = c_range.analyze()
-        self.assertTrue(result['NasModel.cs'].line_count == 78)
-        self.assertTrue(result['NasModel.cs'].changes[0] == '')
+        self.assertTrue(result[self.nas_model].line_count == 78)
+        self.assertTrue(result[self.nas_model].changes[0] == '')
 
-        num_changes_done_by_me = len(list(filter(lambda x: x == 'Michal-MK', result['NasModel.cs'].changes)))
-        self.assertTrue(num_changes_done_by_me == result['NasModel.cs'].line_count)
+        num_changes_done_by_me = len(list(filter(lambda x: x == 'Michal-MK', result[self.nas_model].changes)))
+        self.assertTrue(num_changes_done_by_me == result[self.nas_model].line_count)
 
     def test_analyze_line_distribution_between_authors(self):
         repo = git.Repo(TEST_REPO2)
@@ -90,11 +98,11 @@ class HistoryAnalyzerTest(unittest.TestCase):
         c_range = CommitRange('HEAD', 'ROOT', repo)
         result = c_range.analyze()
 
-        self.assertTrue(result['NasModel.cs'].line_count == 85)
-        self.assertTrue(result['NasModel.cs'].changes[0] == '')
-        self.assertTrue(by(result['NasModel.cs'].changes[1:75], "Michal-MK"))
-        self.assertTrue(by(result['NasModel.cs'].changes[76:76 + 7], "Other Name"))
-        self.assertTrue(by(result['NasModel.cs'].changes[83:85], "Michal-MK"))
+        self.assertTrue(result[self.nas_model].line_count == 85)
+        self.assertTrue(result[self.nas_model].changes[0] == '')
+        self.assertTrue(by(result[self.nas_model].changes[1:75], "Michal-MK"))
+        self.assertTrue(by(result[self.nas_model].changes[76:76 + 7], "Other Name"))
+        self.assertTrue(by(result[self.nas_model].changes[83:85], "Michal-MK"))
 
     def test_analyze_percentage(self):
         repo = git.Repo(TEST_REPO2)
