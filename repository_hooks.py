@@ -42,22 +42,26 @@ class PR:
         self.source_branch = source_branch
 
 
-class RemoteRepository:
+class RemoteRepository(abc.ABC):
     def __init__(self, project_path: str, access_token: str):
-        self.url = project_path
+        self.path = project_path
+        self.slash_path = "/" + project_path
         self.access_token = access_token
         self.host = "https://github.com"
 
+    @property
     @abc.abstractmethod
-    def get_issues(self) -> List[Issue]:
+    def issues(self) -> List[Issue]:
         pass
 
+    @property
     @abc.abstractmethod
-    def get_pull_requests(self) -> List[PR]:
+    def pull_requests(self) -> List[PR]:
         pass
 
+    @property
     @abc.abstractmethod
-    def get_members(self) -> List[str]:
+    def members(self) -> List[str]:
         pass
 
 
@@ -69,7 +73,8 @@ class GitLabRepository(RemoteRepository):
         self.connection.auth()
         self.project = self.connection.projects.get(project_path, lazy=False)
 
-    def get_issues(self) -> List[Issue]:
+    @property
+    def issues(self) -> List[Issue]:
         return [Issue(name=x.title,
                       description=x.description,
                       created_at=x.created_at,
@@ -80,7 +85,8 @@ class GitLabRepository(RemoteRepository):
                       assigned_to=x.assignee['name'])
                 for x in self.project.issues.list(iterator=True)]
 
-    def get_pull_requests(self) -> List[PR]:
+    @property
+    def pull_requests(self) -> List[PR]:
         return [PR(name=x.title,
                    description=x.description,
                    created_at=x.created_at,
@@ -93,8 +99,9 @@ class GitLabRepository(RemoteRepository):
                    source_branch=x.source_branch)
                 for x in self.project.mergerequests.list(iterator=True)]
 
-    def get_members(self) -> List[str]:
-        return [x.name for x in self.project.members.list(iterator=True)]
+    @property
+    def members(self) -> List[str]:
+        return [x.name for x in self.project.members_all.list(iterator=True)]
 
 
 class GithubRepository(RemoteRepository):
@@ -104,7 +111,16 @@ class GithubRepository(RemoteRepository):
     # Github is not supported in the final version
 
 
-def parse_projects(projects_path: Path, access_token: str) -> List[RemoteRepository]:
+def parse_project(project: str, gitlab_access_token: str, github_access_token: str) -> RemoteRepository:
+    uri = urllib3.util.parse_url(project)
+    if "gitlab" in uri.host:
+        return GitLabRepository(uri.scheme + '://' + uri.host, uri.path[1:], gitlab_access_token)
+    if "github" in uri.host:
+        return GithubRepository(uri.path, github_access_token)
+    raise ValueError(f"Unknown host {uri.host}")
+
+
+def parse_projects(projects_path: Path, gitlab_access_token: str, github_access_token: str) -> List[RemoteRepository]:
     projects = []
     if not projects_path.exists():
         raise FileNotFoundError(f"Projects file not found at {projects_path.absolute()}")
@@ -115,9 +131,6 @@ def parse_projects(projects_path: Path, access_token: str) -> List[RemoteReposit
             projects.append(line.strip())
     repos: List[RemoteRepository] = []
     for project in projects:
-        uri = urllib3.util.parse_url(project)
-        if "gitlab" in uri.host:
-            repos.append(GitLabRepository(uri.scheme + '://' + uri.host, uri.path[1:], access_token))
-        if "github" in uri.host:
-            repos.append(GithubRepository(uri.path, access_token))
+        repo = parse_project(project, gitlab_access_token, github_access_token)
+        repos.append(repo)
     return repos

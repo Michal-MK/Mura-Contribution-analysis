@@ -8,6 +8,7 @@ import git
 from configuration import Configuration
 from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
 from lib import FileGroup, Contributor, get_contributors, set_repo, compute_file_ownership, find_contributor
+from repository_hooks import parse_project
 from semantic_analysis import LangElement
 from semantic_weight_model import SemanticWeightModel
 
@@ -93,3 +94,12 @@ def merge_results(repo: git.Repo,
             total_weight += weight
 
         print(f"Total weight: {total_weight}")
+
+    remote_url = repo.remote(name=config.default_remote_name).url
+    project = parse_project(remote_url, config.gitlab_access_token, config.github_access_token)
+
+    if project is None:
+        print("No project found for remote url: {}".format(remote_url))
+        return
+
+    print("Github projects not supported.")

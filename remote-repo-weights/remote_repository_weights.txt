@@ -1,0 +1,11 @@
+base_issue_weight = 10
+base_pr_weight = 20
+
+no_pr_review_multiplier = 0.2
+no_issue_activity_multiplier = 0.2
+
+stale_pr_multiplier = 0.5
+stale_pr_days = 7
+
+large_pr_multiplier = 0.5
+large_pr_commits = 10
