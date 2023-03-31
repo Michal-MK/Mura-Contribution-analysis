@@ -1,9 +1,9 @@
 from pathlib import Path
-from typing import Dict
+from typing import Optional
 
 from fs_access import parse_model_content
 
-WEIGHT_MODELS: Dict[str, 'RemoteRepositoryWeightModel'] = {}
+CACHE: Optional['RemoteRepositoryWeightModel'] = None
 
 
 class RemoteRepositoryWeightModel:
@@ -18,14 +18,15 @@ class RemoteRepositoryWeightModel:
         self.large_pr_commits = 0
 
     @staticmethod
-    def parse(provider: str) -> 'RemoteRepositoryWeightModel':
-        if provider in WEIGHT_MODELS:
-            return WEIGHT_MODELS[provider]
+    def load() -> 'RemoteRepositoryWeightModel':
+        global CACHE
+        if CACHE is not None:
+            return CACHE
 
         weight_model = RemoteRepositoryWeightModel()
         base_weights = Path(__file__).parent / "remote-repo-weights" / "remote_repository_weights.txt"
 
         weight_model = parse_model_content(weight_model, base_weights)
 
-        WEIGHT_MODELS[provider] = weight_model
-        return weight_model
+        CACHE = weight_model
+        return CACHE

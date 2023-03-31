@@ -17,10 +17,9 @@ class Configuration:
         self.default_remote_name = "origin"
 
         self.parsed_rules: RuleCollection = RuleCollection([])
-        self.projects: List[RemoteRepository] = []
 
     @staticmethod
-    def load_from_file(config_path: Path, rules_path: Path, projects_path: Path) -> 'Configuration':
+    def load_from_file(config_path: Path, rules_path: Path) -> 'Configuration':
         ret = Configuration()
         parse_model_content(ret, config_path)
         if ret.gitlab_access_token == "" and 'GITLAB_ACCESS_TOKEN' in os.environ:
@@ -28,6 +27,5 @@ class Configuration:
         if ret.github_access_token == "" and 'GITHUB_ACCESS_TOKEN' in os.environ:
             ret.github_access_token = os.environ['GITHUB_ACCESS_TOKEN']
         ret.parsed_rules = parse_rule_file(rules_path)
-        ret.projects = parse_projects(projects_path, ret.gitlab_access_token, ret.github_access_token)
 
         return ret

@@ -263,6 +263,9 @@ class ContributionDistribution:
         yield self.file
         yield self.percentage
 
+    def __str__(self):
+        return f"{os.path.relpath(self.file, REPO.working_dir)} ({self.percentage})"
+
 
 def compute_file_ownership(percentage: Percentage, contributors: List[Contributor], config: Configuration) \
         -> Dict[Contributor, List[ContributionDistribution]]:

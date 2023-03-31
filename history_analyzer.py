@@ -112,7 +112,7 @@ class CommitRange:
                             ret[file_name] = ret[change.previous_name]
                             del ret[change.previous_name]
                         else:
-                            self.populate_previously_unseen_file(change, commit_hash, file_name, ret)
+                            self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret)
                         for hunk in change.hunks:
                             ret[file_name].add_change(hunk, change.author)
                     elif change.hunks and change.hunks[0].mode == 'A':
@@ -123,12 +123,28 @@ class CommitRange:
                     elif change.hunks[0].mode == 'M':
                         # This file already existed in the repo, this can occur if the analysis does not
                         # start from the first commit
-                        self.populate_previously_unseen_file(change, commit_hash, file_name, ret)
+                        self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret)
+                    continue
 
+                elif file_name in ret and change.hunks and change.hunks[0].mode == 'A' and not ret[file_name].exists:
+                    # This file was deleted in a previous commit and re-added in this commit
+                    ret[file_name].exists = True
+                    ret[file_name].history.append(ret[file_name].changes)
+                    ret[file_name].changes = [change.author for _ in range(change.hunks[0].change_end)]
+                    ret[file_name]._line_count = change.hunks[0].change_end  # Lines are indexes starting with 1
+                    ret[file_name].line_count = change.hunks[0].change_end - 1
+                    continue
+
+                elif file_name in ret and change.hunks and change.hunks[0].mode == 'D':
+                    ret[file_name].delete()
                     continue
 
                 for hunk in change.hunks:
                     if file_name not in ret and hunk.mode == 'D':
+                        continue
+                    if file_name in ret and hunk.mode == 'A':
+                        # This file was added in a previous commit as well as in this commit
+                        # Likely a conflict down the line
                         continue
                     ret[file_name].add_change(hunk, change.author)
 
@@ -219,7 +235,7 @@ class Change:
     def __init__(self, author: str) -> None:
         self.hunks: List[FileSection] = []
         self.author = author
-        self.previous_name: Optional[str] = None
+        self.previous_name: Optional[Path] = None
         self.is_binary = False
 
     def add_hunk(self, prev_start: int, prev_len: int, change_start: int, change_len: int,
@@ -237,32 +253,33 @@ class Ownership:
         self.changes[0] = ''
         self._line_count = init_line_count  # Lines are indexes starting with 1
         self.line_count = init_line_count - 1
+        self.exists = True
+
+    def delete(self):
+        self.history.append(copy.deepcopy(self.changes))
+        self.changes = []
+        self._line_count = 0
+        self.line_count = 0
+        self.exists = False
 
     def add_change(self, hunk: FileSection, author: AuthorName) -> None:
         self.history.append(copy.deepcopy(self.changes))
+
+        assert hunk.mode != 'A', "This function can only be used to add changes to existing files."
 
         if self._line_count == -1:
             # This is a binary file
             self.changes[0] = author
             return
 
-        assert hunk.change_start >= 0 and hunk.change_start <= self._line_count + 1  # +1 for a possibly missing new line
-
-        if hunk.change_len > 0 and hunk.mode != 'A':
+        try:
+            assert hunk.change_start >= 0 and hunk.change_start <= self._line_count, \
+                f"Change start {hunk.change_start} is out of bounds for file with {self._line_count} lines."
+        except AssertionError as e:
+            pass
+        if hunk.change_len > 0:
             for i in range(hunk.change_len):
                 self.changes.insert(hunk.change_start + i, '_')
-            self._line_count = len(self.changes)
-            self.line_count = self._line_count - 1
-
-        if hunk.change_start == len(self.changes):
-            # File did not end with a newline, and we are extending it
-            self.changes.append('')
-            self._line_count = len(self.changes)
-            self.line_count = self._line_count - 1
-
-        if hunk.change_end == len(self.changes) + 1:
-            # File did not end with a newline, and we are extending it
-            self.changes.append('')
             self._line_count = len(self.changes)
             self.line_count = self._line_count - 1
 
@@ -306,7 +323,7 @@ def get_file_changes(commit_hash: str, repo: Repo) -> Dict[Path, Change]:
             mode = "A" if diff.new_file else "M"
         if diff.renamed:
             mode = "R"
-            ret[actual_path].previous_name = diff.a_path
+            ret[actual_path].previous_name = repo_p(diff.a_path)
         for match in matches:
             prev_line_start, prev_line_len, line_start, line_len = match
             change_start = int(line_start)

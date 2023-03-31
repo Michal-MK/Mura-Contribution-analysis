@@ -1,2 +1,6 @@
 levenshtein
 python-gitlab
+PyGithub
+
+# Jupiter for debugging, not necessary for running the scripts
+#jupyter
