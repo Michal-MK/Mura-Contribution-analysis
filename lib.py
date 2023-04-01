@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import os
-import typing
 from pathlib import Path
-from typing import Union, List, Optional, Literal, Set, Dict, Tuple, DefaultDict
+from typing import Union, List, Optional, Set, Dict, Tuple, DefaultDict, Any, TYPE_CHECKING
 
-from git import Repo, Commit
+from git import Repo, Commit, Actor
 
+from uni_chars import *
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     from configuration import Configuration
     from history_analyzer import CommitRange
 
@@ -52,37 +52,55 @@ def commit_summary(commit: Commit) -> None:
     print(f"Message: {commit.message}")
 
 
-def stats_for_contributor(contributor: str) -> None:
+def stats_for_contributor(contributor: Contributor, commit_range: CommitRange) -> Tuple[int, int]:
     insertions = 0
     deletions = 0
-    print(f"Stats for {contributor}:")
     for commit in REPO.iter_commits():
-        if commit.author.name == contributor:
-            # thanks_python_for_not_letting_me_inline_this_variable = commit.message.split('\n')[0]
-            # print(f"Commit: {thanks_python_for_not_letting_me_inline_this_variable}")
-            # print(commit.stats.total)
+        if contributor == commit.author and str(commit.hexsha) in commit_range:
             insertions += commit.stats.total['insertions']
             deletions += commit.stats.total['deletions']
-    print(f"Total insertions: {insertions}")
-    print(f"Total deletions: {deletions}")
+    return insertions, deletions
 
+class FlaggedFiles:
+    def __init__(self):
+        self.counts = {"A": 0, "R": 0, "D": 0, "M": 0}
+        self.paths = {"A": [], "R": [], "D": [], "M": []}
 
-def get_files_with_flag(commit: Commit, flag: Literal["A", "R", "D", "M"]) -> List[str]:
-    print(f"Files with flag {flag}:")
+    def update(self, flag: str, count: int, paths: List[Path]):
+        self.counts[flag] += count
+        self.paths[flag].extend(paths)
+
+def get_files_with_flags(commit: Commit) -> Dict[str, List[Union[int, List[Any]]]]:
+    flags = ["A", "R", "D", "M"]
+    result: Dict[str, List[Union[int, List[Any]]]] = {flag: [0, []] for flag in flags}
     parent: Optional[Commit] = None
     if commit.parents:
         parent = commit.parents[0]
 
-    if parent is None and flag != "A":
-        return []
-    if parent is None and flag == "A":
-        return [file.name for file in commit.tree.blobs]
+    if parent is None:
+        result["A"] = [len(commit.tree.blobs), [Path(file.name) for file in commit.tree.blobs]]
+        return result
 
-    files = []
-    for diff in commit.diff(parent):
-        if diff.change_type == flag:
-            files.append(diff.b_path)
-    return files
+    for diff in parent.diff(commit):
+        if diff.change_type in flags:
+            result[diff.change_type][0] += 1  # type: ignore
+            result[diff.change_type][1].append(Path(diff.b_path))  # type: ignore
+    return result
+def get_flagged_files_by_contributor(commits: List[str], contributors: List[Contributor]) -> Dict[str, FlaggedFiles]:
+    result = {}
+    for commit_hexsha in commits:
+        commit = REPO.commit(commit_hexsha)
+        author = commit.author
+        contributor = next((c for c in contributors if c == author), None)
+        if contributor is None:
+            continue
+        name = contributor.name
+        if name not in result:
+            result[name] = FlaggedFiles()
+        flagged_files = get_files_with_flags(commit)
+        for flag, (count, paths) in flagged_files.items():
+            result[name].update(flag, count, paths)
+    return result
 
 
 def try_checkout(commit_hash: str, force: bool = False) -> None:
@@ -107,7 +125,7 @@ def _ignored_files() -> List[str]:
     return ret
 
 
-def get_tracked_files(project_root: Union[Path, Repo]) -> List[FileGroup]:
+def get_tracked_files(project_root: Optional[Union[Path, Repo]] = None) -> List[FileGroup]:
     """
     Find all files that are related, relative to the project root
     :
@@ -115,6 +133,12 @@ def get_tracked_files(project_root: Union[Path, Repo]) -> List[FileGroup]:
     :return: A dictionary of all directories and their files which are related to each other
     """
     ret: List[FileGroup] = []
+
+    if project_root is None:
+        if REPO is None:
+            raise ValueError(f"{ERROR} No project_root specified! Did you execute all code blocks above?")
+        project_root = REPO
+        print(f"{INFO} Using implicit project at: {project_root.working_dir}.")
 
     if isinstance(project_root, Repo):
         repo_dir = project_root.working_dir
@@ -183,8 +207,14 @@ class Contributor:
         self.email = email
         self.aliases: List['Contributor'] = []
 
+    def contrib_equal(self, other: Union[Actor, Contributor]):
+        return self.name == other.name and self.email == other.email or \
+                  any([a.contrib_equal(other) for a in self.aliases])
+
     def __eq__(self, other):
-        return isinstance(other, Contributor) and other.name == self.name and other.email == self.email
+        if isinstance(other, str):
+            return self.name == other or self.email == other or any([a.name == other for a in self.aliases])
+        return self.contrib_equal(other)
 
     def __hash__(self):
         return hash(self.name) + hash(self.email)
@@ -204,7 +234,8 @@ class Percentage:
         self.global_contribution = global_contribution
 
 
-def get_contributors(range:Optional[CommitRange]=None, match_on_name=True, match_on_email=True) -> List[Contributor]:
+def get_contributors(range: Optional[CommitRange] = None, match_on_name=True, match_on_email=True,
+                     explicit_rules: Optional[List[Tuple[str, str]]] = None) -> List[Contributor]:
     """
     Get a list of all contributors
 
@@ -237,13 +268,20 @@ def get_contributors(range:Optional[CommitRange]=None, match_on_name=True, match
                 other.aliases.append(it)
                 matched = True
                 break
+            if explicit_rules is not None:
+                for a, b in explicit_rules:
+                    if it.name == a and other.name == b or \
+                       it.name == b and other.name == a:
+                        other.aliases.append(it)
+                        matched = True
+                        break
 
         if not matched:
             matched_contributors.append(it)
     return matched_contributors
 
 
-def find_contributor(contributors: List[Contributor], author: str) -> Contributor:
+def find_contributor(contributors: List[Contributor], author: str) -> Optional[Contributor]:
     for contributor in contributors:
         if author == contributor.name:
             return contributor
@@ -251,11 +289,11 @@ def find_contributor(contributors: List[Contributor], author: str) -> Contributo
             return contributor
         if author in list(map(lambda x: x.name, contributor.aliases)):
             return contributor
-    raise ValueError('Contributor not found')
+    return None
 
 
 class ContributionDistribution:
-    def __init__(self, file: str, percentage: float):
+    def __init__(self, file: Path, percentage: float):
         self.file = file
         self.percentage = percentage
 

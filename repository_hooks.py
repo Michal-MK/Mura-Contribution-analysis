@@ -10,8 +10,12 @@ import gitlab
 import github
 import urllib3.util
 
+from uni_chars import *
+
 if TYPE_CHECKING:
     from configuration import Configuration
+
+DTF = "%Y-%m-%dT%H:%M:%S.%f%z"
 
 
 class Issue:
@@ -72,8 +76,13 @@ class GitLabRepository(RemoteRepository):
     def __init__(self, host: str, project_path: str, access_token: str):
         super().__init__(project_path, access_token)
         self.host = host
-        self.connection = gitlab.Gitlab(host, private_token=access_token)
-        self.connection.auth()
+        try:
+            self.connection = gitlab.Gitlab(host, private_token=access_token)
+            self.connection.auth()
+        except Exception as e:
+            print(f"{ERROR} Could not connect to GitLab instance at {host}, check your access token.")
+            raise e
+
         if project_path.startswith("/"):
             project_path = project_path[1:]
         if project_path.endswith(".git"):
@@ -86,8 +95,8 @@ class GitLabRepository(RemoteRepository):
         var = self.project.issues.list(iterator=True)
         return [Issue(name=x.title,
                       description=x.description,
-                      created_at=x.created_at,
-                      closed_at=x.closed_at,
+                      created_at=datetime.datetime.strptime(x.created_at, DTF),
+                      closed_at=datetime.datetime.strptime(x.closed_at, DTF) if x.closed_at is not None else None,
                       state=x.state,
                       closed_by=x.attributes['closed_by']['name'] if x.state == 'closed' else '',
                       author=x.author['name'],
@@ -99,9 +108,9 @@ class GitLabRepository(RemoteRepository):
         var = self.project.mergerequests.list(iterator=True)
         return [PR(name=x.title,
                    description=x.description,
-                   created_at=x.created_at,
+                   created_at=datetime.datetime.strptime(x.created_at, DTF),
                    merge_status=x.merge_status,
-                   merged_at=x.merged_at,
+                   merged_at=datetime.datetime.strptime(x.merged_at, DTF) if x.merged_at is not None else None,
                    merged_by=x.merged_by['name'] if x.merged_at is not None else '',
                    author=x.author['name'],
                    commit_shas=[c.id for c in x.commits()],
@@ -122,7 +131,13 @@ class GithubRepository(RemoteRepository):
         if project_path.endswith(".git"):
             project_path = project_path[:-4]
         super().__init__(project_path, access_token)
-        self.connection = github.Github(access_token)
+
+        try:
+            self.connection = github.Github(access_token)
+        except Exception as e:
+            print(f"{ERROR} Could not connect to GitHub, check your access token.")
+            raise e
+
         self.project = self.connection.get_repo(project_path)
         self.name = self.project.name
 
@@ -157,7 +172,7 @@ class GithubRepository(RemoteRepository):
 
     @property
     def members(self) -> List[str]:
-        return [x.name for x in self.project.get_contributors()]
+        return [x.name if x.name is not None else "" for x in self.project.get_contributors()]
 
 
 def parse_project(project: str, gitlab_access_token: str, github_access_token: str) -> RemoteRepository:
@@ -166,7 +181,7 @@ def parse_project(project: str, gitlab_access_token: str, github_access_token: s
         return GitLabRepository(uri.scheme + '://' + uri.host, uri.path, gitlab_access_token)
     if "github" in uri.host:
         return GithubRepository(uri.path, github_access_token)
-    raise ValueError(f"Unknown host {uri.host}")
+    raise ValueError(f"{ERROR} Unknown host {uri.host}")
 
 
 def parse_projects(projects_path: Path, gitlab_access_token: str, github_access_token: str) -> List[RemoteRepository]:

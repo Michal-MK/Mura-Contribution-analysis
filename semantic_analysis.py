@@ -114,28 +114,17 @@ class LangSemantics:
             ranges = split[1].strip().replace('[', '').replace(']', '').split('-')
             start = int(ranges[0])
             end = int(ranges[1])
-            if kind == 'class':
-                _class = LangElement(kind, parent, [])
-                _class.start = start
-                _class.end = end
-                if root.end < end:
-                    root.end = end
-                if parent.in_range(start, end):
-                    parent.children.append(_class)
-                else:
-                    root.children.append(_class)
-                    parent = _class
-            if kind in ['function', 'property', 'field']:
-                _def = LangElement(kind, parent, [])
-                _def.start = start
-                _def.end = end
-                if root.end < end:
-                    root.end = end
-                if parent.in_range(start, end):
-                    parent.children.append(_def)
-                else:
-                    root.children.append(_def)
-
+            elem = LangElement(kind, parent, [])
+            elem.start = start
+            elem.end = end
+            if root.end < end:
+                root.end = end
+            if parent.in_range(start, end):
+                parent.children.append(elem)
+            else:
+                root.children.append(elem)
+                if kind == 'class':
+                    parent = elem
         return root
 
 

@@ -3,9 +3,15 @@ import re
 from collections import deque, defaultdict
 from pathlib import Path
 from typing import List, Dict, Tuple, Deque, Optional, DefaultDict, Set
+
+import git
+import lib
+
 from lib import Percentage, first_commit, repo_p
 
 from git import Repo
+
+from uni_chars import *
 
 AuthorName = str
 AuthorPtr = int
@@ -29,10 +35,39 @@ class CommitHistory:
 
 
 class CommitRange:
-    def __init__(self, head: str, hist: str, repo: Repo):
+    def __init__(self, head: str, hist: str, repo: Optional[Repo] = None):
         self.head = head
         self.hist = hist
-        self.repo = repo
+        if repo is None:
+            if lib.REPO is None:
+                raise ValueError(f"{ERROR} No repository set! Did you evaluate all code blocks above?")
+            self.repo = lib.REPO
+        else:
+            self.repo = repo
+
+        if self.head.lower() == 'head':
+            self.head = self.repo.head.commit.hexsha
+        if self.hist.lower() == 'root':
+            self.hist = first_commit(self.repo.commit(self.head)).hexsha
+        marks = self.repo.git.execute(["git", "show-ref", "--heads", "--tags"])
+        assert isinstance(marks, str)
+
+        merged_marked_commits = [y.split() for y in marks.splitlines()]
+        marked_commits = [(str(x[0]), str(x[1]).replace('refs/heads/', '').replace('refs/tags/', ''))
+                          for x in merged_marked_commits]
+
+        for mk in marked_commits:
+            if mk[1] == self.head:
+                self.head = mk[0]
+            if mk[1] == self.hist:
+                self.hist = mk[0]
+
+        self.head_commit: git.Commit = self.repo.commit(self.head)
+        self.hist_commit: git.Commit = self.repo.commit(self.hist)
+
+        print(f"{SUCCESS} Commit range: {self.head}...{self.hist}")
+        print(f" - Final commit by: '{self.head_commit.author.name}', ({self.head_commit.committed_datetime})")
+        print(f" - Initial commit by: '{self.hist_commit.author.name}', ({self.hist_commit.committed_datetime})")
 
     def __iter__(self):
         for commit in self.compute_path():
@@ -43,23 +78,6 @@ class CommitRange:
         Compute the path from <current_commit_hash> to <historical_commit_hash> in the <repo>
         :return: A list of commit hashes sorted from <current_commit_hash> to <historical_commit_hash>
         """
-        if self.head.lower() == 'head':
-            self.head = self.repo.head.commit.hexsha
-        if self.hist.lower() == 'root':
-            self.hist = first_commit(self.repo.commit(self.head)).hexsha
-        marks = self.repo.git.execute(["git", "show-ref", "--heads", "--tags"])
-        assert isinstance(marks, str)
-
-        merged_marked_commits = [y.split() for y in marks.splitlines()]
-        marked_commits = [(str(x[0]), str(x[1]).replace('refs/heads/', '').replace('refs/tags/', ''))
-                                                 for x in merged_marked_commits]
-
-        for mk in marked_commits:
-            if mk[1] == self.head:
-                self.head = mk[0]
-            if mk[1] == self.hist:
-                self.hist = mk[0]
-
         c_range = f"{self.head}...{self.hist}"
         output = self.repo.git.execute(["git", "rev-list", "--topo-order", "--ancestry-path", "--reverse", c_range])
         assert isinstance(output, str)

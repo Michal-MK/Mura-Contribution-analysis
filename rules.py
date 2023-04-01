@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import List, Dict
 
 from lib import ContributionDistribution, Contributor, repo_p
+from uni_chars import *
+
 
 class RuleOp(Enum):
     EQUALS = 1
@@ -13,6 +15,7 @@ class RuleOp(Enum):
     GREATER_THAN_OR_EQUALS = 3
     LESS_THAN = 4
     LESS_THAN_OR_EQUALS = 5
+
 
 class Rule:
     def __init__(self, contributor: str, directory: str, file: str, amount: str):
@@ -59,7 +62,7 @@ class Rule:
         for file, percentage in ownership:
             repo_path = repo_p(file)
 
-            if repo_path.parent.match(self.directory) and self.file.match(file):
+            if repo_path.parent.match(self.directory) and self.file.match(str(file)):
                 if self.op_call(percentage, self.amount):
                     return True
         return False
@@ -107,16 +110,16 @@ class RuleCollection:
         return ret
 
 
-def parse_rule_file(rule_definitions: Path) -> RuleCollection:
+def parse_rule_file(rule_definitions: Path, verbose=False) -> RuleCollection:
     if not rule_definitions.exists():
-        raise Exception(f"Rule definitions file {rule_definitions} does not exist")
+        raise Exception(f"{ERROR} Rule definitions file {rule_definitions} does not exist")
 
     with rule_definitions.open() as f:
         lines = f.readlines()
-        return parse_rules(lines)
+        return parse_rules(lines, verbose)
 
 
-def parse_rules(lines: List[str]) -> RuleCollection:
+def parse_rules(lines: List[str], verbose=False) -> RuleCollection:
     rules = []
     for line in lines:
         line = line.strip()
@@ -144,5 +147,14 @@ def parse_rules(lines: List[str]) -> RuleCollection:
             index += 1
 
         section_content.append(line[section_start:])
-        rules.append(Rule(*section_content))
+        rule = Rule(*section_content)
+
+        if verbose:
+            print(f" - Rule: {rule}")
+
+        rules.append(rule)
+
+    if verbose:
+        print()
+
     return RuleCollection(rules)

@@ -1,5 +1,5 @@
 base_issue_weight = 10
-base_pr_weight = 20
+base_pr_weight = 40
 
 no_pr_review_multiplier = 0.2
 no_issue_activity_multiplier = 0.2

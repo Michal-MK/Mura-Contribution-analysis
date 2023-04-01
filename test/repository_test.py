@@ -33,7 +33,7 @@ class RepositoryTests(unittest.TestCase):
 
         self.assertTrue(len(issues) >= 10)
 
-        an_issue = list(filter(lambda x: datetime.datetime.strptime(x.created_at, F) == creation_date, issues))[0]
+        an_issue = list(filter(lambda x: x.created_at == creation_date, issues))[0]
 
         self.assertTrue(an_issue.name == "Steward service")
         self.assertTrue(an_issue.description == "- [x] CRUD ops")
@@ -49,7 +49,7 @@ class RepositoryTests(unittest.TestCase):
         prs = [x for x in project.pull_requests]
 
         def filter_lambda(x):
-            return datetime.datetime.strptime(x.merged_at, F) == merge if x.merged_at is not None else False
+            return x.merged_at == merge if x.merged_at is not None else False
 
         a_merge = list(filter(filter_lambda, prs))[0]
 
