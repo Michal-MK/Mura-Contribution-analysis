@@ -1,4 +1,5 @@
 levenshtein
+GitPython
 python-gitlab
 PyGithub
 matplotlib

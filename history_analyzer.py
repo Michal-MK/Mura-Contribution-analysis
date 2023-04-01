@@ -7,7 +7,7 @@ from typing import List, Dict, Tuple, Deque, Optional, DefaultDict, Set
 import git
 import lib
 
-from lib import Percentage, first_commit, repo_p
+from lib import Percentage, first_commit, repo_p, Contributor, find_contributor
 
 from git import Repo
 
@@ -35,7 +35,7 @@ class CommitHistory:
 
 
 class CommitRange:
-    def __init__(self, head: str, hist: str, repo: Optional[Repo] = None):
+    def __init__(self, head: str, hist: str, repo: Optional[Repo] = None, verbose=False):
         self.head = head
         self.hist = hist
         if repo is None:
@@ -65,9 +65,10 @@ class CommitRange:
         self.head_commit: git.Commit = self.repo.commit(self.head)
         self.hist_commit: git.Commit = self.repo.commit(self.hist)
 
-        print(f"{SUCCESS} Commit range: {self.head}...{self.hist}")
-        print(f" - Final commit by: '{self.head_commit.author.name}', ({self.head_commit.committed_datetime})")
-        print(f" - Initial commit by: '{self.hist_commit.author.name}', ({self.hist_commit.committed_datetime})")
+        if verbose:
+            print(f"{SUCCESS} Commit range: {self.head}...{self.hist}")
+            print(f" - Final commit on: {self.head_commit.committed_datetime}")
+            print(f" - Initial commit on: {self.hist_commit.committed_datetime}")
 
     def __iter__(self):
         for commit in self.compute_path():
@@ -357,26 +358,28 @@ def get_file_changes(commit_hash: str, repo: Repo) -> Dict[Path, Change]:
     return ret
 
 
-def calculate_percentage(result: AnalysisResult) -> Percentage:
-    ret: Dict[Path, List[Tuple[str, float]]] = {}
-    author_total: DefaultDict[str, int] = defaultdict(lambda: 0)
+def calculate_percentage(contributors: List[Contributor], result: AnalysisResult) -> Percentage:
+    ret: Dict[Path, List[Tuple[Contributor, float]]] = {}
+    author_total: DefaultDict[Contributor, int] = defaultdict(lambda: 0)
     lines_total = 0
 
     for path, val in result.items():
         ret[path] = []
-        intermediate: DefaultDict[str, int] = defaultdict(lambda: 0)
+        intermediate: DefaultDict[Contributor, int] = defaultdict(lambda: 0)
         for author in val.changes[1:]:
-            intermediate[author] = intermediate[author] + 1
-            author_total[author] = author_total[author] + 1
+            contributor = find_contributor(contributors, author)
+            assert contributor is not None, f"Could not find contributor for author {author}"
+            intermediate[contributor] = intermediate[contributor] + 1
+            author_total[contributor] = author_total[contributor] + 1
             lines_total += 1
         file_lines = len(val.changes[1:])
-        for author, lines in intermediate.items():
-            ret[path].append((author, lines / file_lines))
+        for contributor, lines in intermediate.items():
+            ret[path].append((contributor, lines / file_lines))
 
     totals: DefaultDict = defaultdict(lambda: 0)
 
-    for author, authors_total_lines in author_total.items():
-        totals[author] = authors_total_lines / lines_total
+    for contributor, authors_total_lines in author_total.items():
+        totals[contributor] = authors_total_lines / lines_total
 
     return Percentage(ret, totals)
 

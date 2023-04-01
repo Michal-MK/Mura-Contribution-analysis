@@ -61,6 +61,7 @@ def stats_for_contributor(contributor: Contributor, commit_range: CommitRange) -
             deletions += commit.stats.total['deletions']
     return insertions, deletions
 
+
 class FlaggedFiles:
     def __init__(self):
         self.counts = {"A": 0, "R": 0, "D": 0, "M": 0}
@@ -69,6 +70,7 @@ class FlaggedFiles:
     def update(self, flag: str, count: int, paths: List[Path]):
         self.counts[flag] += count
         self.paths[flag].extend(paths)
+
 
 def get_files_with_flags(commit: Commit) -> Dict[str, List[Union[int, List[Any]]]]:
     flags = ["A", "R", "D", "M"]
@@ -86,6 +88,8 @@ def get_files_with_flags(commit: Commit) -> Dict[str, List[Union[int, List[Any]]
             result[diff.change_type][0] += 1  # type: ignore
             result[diff.change_type][1].append(Path(diff.b_path))  # type: ignore
     return result
+
+
 def get_flagged_files_by_contributor(commits: List[str], contributors: List[Contributor]) -> Dict[str, FlaggedFiles]:
     result = {}
     for commit_hexsha in commits:
@@ -205,11 +209,12 @@ class Contributor:
     def __init__(self, name: str, email: str):
         self.name = name
         self.email = email
+        self.anonymized = False
         self.aliases: List['Contributor'] = []
 
     def contrib_equal(self, other: Union[Actor, Contributor]):
         return self.name == other.name and self.email == other.email or \
-                  any([a.contrib_equal(other) for a in self.aliases])
+            any([a.contrib_equal(other) for a in self.aliases])
 
     def __eq__(self, other):
         if isinstance(other, str):
@@ -220,6 +225,8 @@ class Contributor:
         return hash(self.name) + hash(self.email)
 
     def __str__(self):
+        if self.anonymized:
+            return f"ANON: {self.name} <{self.email}>"
         return f"{self.name} <{self.email}> ({[str(a) for a in self.aliases]})"
 
     def __repr__(self):
@@ -228,14 +235,14 @@ class Contributor:
 
 class Percentage:
     # Tuple[Dict[str, List[Tuple[str, float]]], Dict[str, float]]:
-    def __init__(self, file_per_contributor: Dict[Path, List[Tuple[str, float]]],
-                 global_contribution: DefaultDict[str, float]):
+    def __init__(self, file_per_contributor: Dict[Path, List[Tuple[Contributor, float]]],
+                 global_contribution: DefaultDict[Contributor, float]):
         self.file_per_contributor = file_per_contributor
         self.global_contribution = global_contribution
 
 
-def get_contributors(range: Optional[CommitRange] = None, match_on_name=True, match_on_email=True,
-                     explicit_rules: Optional[List[Tuple[str, str]]] = None) -> List[Contributor]:
+def get_contributors(config: 'Configuration', range: Optional[CommitRange] = None, match_on_name=True,
+                     match_on_email=True) -> List[Contributor]:
     """
     Get a list of all contributors
 
@@ -268,16 +275,26 @@ def get_contributors(range: Optional[CommitRange] = None, match_on_name=True, ma
                 other.aliases.append(it)
                 matched = True
                 break
-            if explicit_rules is not None:
-                for a, b in explicit_rules:
+            if config.contributor_map is not None:
+                for a, b in config.contributor_map:
                     if it.name == a and other.name == b or \
-                       it.name == b and other.name == a:
+                            it.name == b and other.name == a:
                         other.aliases.append(it)
                         matched = True
                         break
 
         if not matched:
             matched_contributors.append(it)
+
+    if config.anonymous_mode:
+        count = 1
+        for contributor in matched_contributors:
+            contributor.aliases.append(Contributor(contributor.name, contributor.email))
+            contributor.name = f"Anonymous #{count}"
+            contributor.email = f"contributor{count}@email.cz"
+            contributor.anonymized = True
+            count += 1
+
     return matched_contributors
 
 

@@ -21,6 +21,9 @@ from collections import defaultdict
 
 from uni_chars import *
 
+ContributorWeight = Dict[Contributor, float]
+GlobalRuleWeightMultiplier = Dict[Contributor, float]
+
 
 def build_tree(triples):
     tree = {}
@@ -88,7 +91,7 @@ def print_tree(tree, level=0, prefix='', ownership_cache=None):
 
 
 def plot_commits(commits: List[str], contributors: List[Contributor], repo: Repo,
-                  force_x_axis_labels=False) -> None:
+                 force_x_axis_labels=False) -> None:
     commit_data = defaultdict(list)
     min_date = datetime.max.replace(tzinfo=timezone.utc)
     max_date = datetime.min.replace(tzinfo=timezone.utc)
@@ -110,7 +113,6 @@ def plot_commits(commits: List[str], contributors: List[Contributor], repo: Repo
         plt.plot_date(dates, range(len(dates)), label=name)
     plt.legend()
     plt.xticks(rotation=45)
-
 
     delta = timedelta(days=1)
     dates = drange(min_date, max_date, delta)
@@ -138,7 +140,7 @@ def header(text: str) -> None:
 
 
 def display_contributor_info(commit_range: CommitRange, config: Configuration) -> List[Contributor]:
-    contributors = get_contributors(range=commit_range, explicit_rules=config.contributor_map)
+    contributors = get_contributors(config, range=commit_range)
     header(f"{CONTRIBUTOR} Contributors:")
 
     for contrib in contributors:
@@ -147,7 +149,8 @@ def display_contributor_info(commit_range: CommitRange, config: Configuration) -
     return contributors
 
 
-def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contributor]) -> Dict[Contributor, int]:
+def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contributor]) \
+        -> Tuple[Dict[Contributor, int], List[Tuple[Contributor, int, int]]]:
     header(f"{COMMIT} Total commits: {len(commit_range.compute_path())}")
 
     commit_distribution: Dict[Contributor, int] = defaultdict(lambda: 0)
@@ -169,34 +172,61 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
     for contrib, count in commit_distribution.items():
         print(f"{count} commits by: {CONTRIBUTOR} {contrib}")
 
+    insertions_deletions = []
+
     for contrib in contributors:
         insertion, deletion = stats_for_contributor(contrib, commit_range)
         print(f"{CONTRIBUTOR} {contrib.name}: inserted '{insertion}' lines and deleted '{deletion}' lines.")
+        insertions_deletions.append((contrib, insertion, deletion))
 
-    return commit_distribution
+    return commit_distribution, insertions_deletions
+
+
+def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int, int]]) -> None:
+    insertions_deletions.sort(key=lambda x: x[1], reverse=True)
+
+    contributor_names = [x[0].name for x in insertions_deletions]
+    insertions = [x[1] for x in insertions_deletions]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    ax1.pie(insertions, labels=contributor_names, autopct='%1.1f%%')
+    ax1.set_title('Insertions')
+
+    # Sort data in descending order by deletions
+    insertions_deletions.sort(key=lambda x: x[2], reverse=True)
+
+    contributor_names = [x[0].name for x in insertions_deletions]
+    deletions = [x[2] for x in insertions_deletions]
+
+    ax2.pie(deletions, labels=contributor_names, autopct='%1.1f%%')
+    ax2.set_title('Deletions')
+
+    fig.subplots_adjust(wspace=0.5)
+
+    plt.show()
 
 
 def percentage_info(syntax: AnalysisResult, contributors: List[Contributor], config: Configuration) \
         -> Tuple[Percentage, Dict[Contributor, List[ContributionDistribution]]]:
     header(f'{PERCENTAGE} Percentage of tracked files:')
 
-    percentage = calculate_percentage(syntax)
+    percentage = calculate_percentage(contributors, syntax)
 
-    for c, p in percentage.global_contribution.items():
-        print(f'\t{c}: {p:.2%}')
+    for contributor_name, percent in percentage.global_contribution.items():
+        print(f'\t{contributor_name}: {percent:.2%}')
 
     ownership = compute_file_ownership(percentage, contributors, config)
 
     for contributor, contribution in ownership.items():
         print(f"Files owned by {CONTRIBUTOR} {contributor.name}")
-        for c in contribution:
-            print(f"\t{c}")
+        for contrib_distribution in contribution:
+            print(f"\t{contrib_distribution}")
         print(f"Total: {len(contribution)} for {CONTRIBUTOR} {contributor}")
 
     return percentage, ownership
 
 
-def display_dir_tree(percentage: Percentage, repo: Repo):
+def display_dir_tree(config: Configuration, percentage: Percentage, repo: Repo):
     header(f"{DIRECTORY_TREE} Dir Tree with ownership:")
 
     triples = []
@@ -209,8 +239,11 @@ def display_dir_tree(percentage: Percentage, repo: Repo):
     print_tree(tree)
 
 
-def rule_info(config: Configuration, ownership: Dict[Contributor, List[ContributionDistribution]]):
+def rule_info(config: Configuration, ownership: Dict[Contributor, List[ContributionDistribution]]) \
+        -> GlobalRuleWeightMultiplier:
     header(f"{RULES} Rules: ")
+
+    ret: GlobalRuleWeightMultiplier = defaultdict(lambda: 1.0)
 
     for rule in config.parsed_rules.rules:
         print(rule)
@@ -224,17 +257,24 @@ def rule_info(config: Configuration, ownership: Dict[Contributor, List[Contribut
         rules_format = [('\t' + str(rule) + os.linesep) for rule in rules]
         print(f"{ERROR} Contributor {c} did not fulfill the following requirements:")
         print("".join(rules_format), end='')
+        ret[c] *= config.rule_violation_multiplier
+
+    return ret
 
 
-def syntax_info():
+def syntax_info() -> Dict[Contributor, float]:
     header(f"{SYNTAX} Syntax:")
     print(f"{INFO} TODO")
+    return defaultdict(lambda: 0.0)
 
 
 def semantic_info(tracked_files: List[FileGroup],
                   ownership: Dict[Contributor, List[ContributionDistribution]],
-                  semantics: List[List[Tuple[SemanticWeightModel, 'LangElement']]]):
+                  semantics: List[List[Tuple[SemanticWeightModel, 'LangElement']]]) \
+        -> ContributorWeight:
     header(f"{SEMANTICS} Semantics:")
+
+    contributor_weight: ContributorWeight = defaultdict(lambda: 0.0)
 
     for i in range(len(tracked_files)):
         group = tracked_files[i]
@@ -255,15 +295,19 @@ def semantic_info(tracked_files: List[FileGroup],
                   f"Fields: {len(list(structure.fields))} "
                   f"Comments: {len(list(structure.comments))} ")
             weight = structure.compute_weight(group_sem[j][0])
-            print(f"{WEIGHT} Total semantic weight: {weight}")
+            print(f"{WEIGHT} Semantic file weight: {weight}")
+            if owner is not None:
+                contributor_weight[owner] += weight
             total_weight += weight
 
         print(f"{WEIGHT} Total weight: {total_weight}")
 
+    return contributor_weight
+
 
 def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, contributors: List[Contributor]) \
-        -> Tuple[List[Tuple[float, List[Contributor]]], List[Tuple[float, List[Contributor]]]]:
-    header(f"{REMOTE_REPOSITORY} Remote repository:")
+        -> ContributorWeight:
+    header(f"{REMOTE_REPOSITORY} Remote repository management:")
 
     start_date = commit_range.hist_commit.committed_datetime
     end_date = commit_range.head_commit.committed_datetime
@@ -278,50 +322,62 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
     print(f"{PULL_REQUESTS} Total pull requests: {len(project.pull_requests)}")
     print(f"{CONTRIBUTOR} Total contributors: {len(project.members)}")
 
-    issue_weights: List[Tuple[float, List[Contributor]]] = []
-    pr_weights: List[Tuple[float, List[Contributor]]] = []
+    contributor_weight: ContributorWeight = defaultdict(lambda: 0.0)
 
     for issue in project.issues:
-        header(f"{ISSUES} Issue: {issue.name} - by {issue.author}")
+        author_contributor = find_contributor(contributors, issue.author)
+        header(f"{ISSUES} Issue: {issue.name} - by "
+               f"{author_contributor.name if author_contributor is not None else 'None'}")
         print(f"Description: {issue.description}")
         print(f"State: {issue.state}")
+        assignee = find_contributor(contributors, issue.assigned_to)
+        closer = find_contributor(contributors, issue.closed_by)
         if issue.assigned_to:
-            print(f"Assignee: {issue.assigned_to}")
+            print(f"Assignee: {assignee.name if assignee is not None else 'None'}")
         if issue.closed_at is not None:
-            print(f"Closed at: {issue.closed_at} by {issue.closed_by}")
+            print(f"Closed at: {issue.closed_at} by "
+                  f"{closer.name if closer is not None else 'None'}")
         issue_weight = remote_weight_model.evaluate(issue, start_date, end_date)
         beneficiaries = []
-        assignee = find_contributor(contributors, issue.assigned_to)
         if assignee is not None:
             beneficiaries.append(assignee)
-        author_contributor = find_contributor(contributors, issue.author)
+            contributor_weight[assignee] += issue_weight
+        if closer is not None:
+            beneficiaries.append(closer)
+            contributor_weight[closer] += issue_weight
         if author_contributor is not None:
             beneficiaries.append(author_contributor)
-        issue_weights.append((issue_weight, beneficiaries))
+            contributor_weight[author_contributor] += issue_weight
 
         print(f"{WEIGHT} Weight {issue_weight} - Beneficiaries: {', '.join(map(lambda x: x.name, beneficiaries))}")
 
     for pr in project.pull_requests:
-        header(f"{PULL_REQUESTS} Pull request: {pr.name} - by {pr.author}")
+        author_contributor = find_contributor(contributors, pr.author)
+        header(f"{PULL_REQUESTS} Pull request: {pr.name} - by "
+               f"{(author_contributor.name if author_contributor is not None else 'None')}")
         print(f"From: {pr.source_branch} to {pr.target_branch}")
         print(f"Description: {pr.description}")
         print(f"State: {pr.merge_status}")
+        merger = find_contributor(contributors, pr.merged_by)
         if pr.merged_at is not None:
-            print(f"Merged at: {pr.merged_at} by {pr.merged_by}")
+            print(f"Merged at: {pr.merged_at} by "
+                  f"{merger.name if merger is not None else 'None'}")
         pr_weight = remote_weight_model.evaluate(pr, start_date, end_date)
         beneficiaries = []
-        merger = find_contributor(contributors, pr.merged_by)
         if merger is not None:
             beneficiaries.append(merger)
+            contributor_weight[merger] += pr_weight
         author_contributor = find_contributor(contributors, pr.author)
         if author_contributor is not None:
             beneficiaries.append(author_contributor)
-        pr_weights.append((pr_weight, beneficiaries))
+            contributor_weight[author_contributor] += pr_weight
+
         print(f"{WEIGHT} Weight {pr_weight} - Beneficiaries: {', '.join(map(lambda x: x.name, beneficiaries))}")
 
-    return issue_weights, pr_weights
+    return contributor_weight
 
-def file_statistics_info(commit_range: CommitRange, contributors: List[Contributor])\
+
+def file_statistics_info(commit_range: CommitRange, contributors: List[Contributor]) \
         -> Dict[str, FlaggedFiles]:
     file_flags = get_flagged_files_by_contributor([x for x in commit_range], contributors)
     for contributor in contributors:
@@ -329,6 +385,53 @@ def file_statistics_info(commit_range: CommitRange, contributors: List[Contribut
         for key, count in file_flags[contributor.name].counts.items():
             print(f" => {key} - {count}")
     return file_flags
+
+
+def summary_info(syntactic_weights: ContributorWeight,
+                 semantic_weights: ContributorWeight,
+                 repo_management_weights: ContributorWeight,
+                 global_rule_weight_multiplier: GlobalRuleWeightMultiplier) -> None:
+    separator()
+    print(f"{WEIGHT} Total weight per contributor for {SYNTAX} Syntax:")
+    for c, w in syntactic_weights.items():
+        print(f" -> {c.name}: {w}")
+
+    separator()
+    print(f"{WEIGHT} Total weight per contributor for {SEMANTICS} Semantics:")
+    for c, w in semantic_weights.items():
+        print(f" -> {c.name}: {w}")
+
+    separator()
+    print(f"{WEIGHT} Total weight per contributor for {REMOTE_REPOSITORY} Remote repository management:")
+    for c, w in repo_management_weights.items():
+        print(f" -> {c.name}: {w}")
+
+    separator()
+    print(f"{WEIGHT}{WARN} Weight multiplier for unfulfilled {RULES} Rules:")
+    for c, w in global_rule_weight_multiplier.items():
+        print(f" -> {c.name}: {w}")
+
+    separator()
+    print(f"{WEIGHT} Total weight per contributor:")
+
+    class ContributorWeightModel:
+        def __init__(self, contributor: Contributor, weight: float):
+            self.contributor = contributor
+            self.weight = weight
+
+    sums = []
+
+    for c in semantic_weights.keys():
+        sums.append(ContributorWeightModel(c, syntactic_weights[c] + semantic_weights[c] + repo_management_weights[c]))
+
+    for weights in sums:
+        weights.weight *= global_rule_weight_multiplier[weights.contributor]
+
+    position = 1
+    for model in sorted(sums, key=lambda x: x.weight, reverse=True):
+        char = NUMBERS[position] if position <= len(NUMBERS) else f"{position}."
+        print(f"{char} -> {model.contributor.name}: {model.weight}")
+        position += 1
 
 
 def display_results(repo: git.Repo,
@@ -341,7 +444,7 @@ def display_results(repo: git.Repo,
 
     contributors = display_contributor_info(commit_range, config)
     separator()
-    _ = commit_info(commit_range, repo, contributors)
+    commit_distribution, insertions_deletions = commit_info(commit_range, repo, contributors)
     separator()
     plot_commits([x for x in commit_range][1:], contributors, repo)
     separator()
@@ -349,16 +452,18 @@ def display_results(repo: git.Repo,
     separator()
     percentage, ownership = percentage_info(syntax, contributors, config)
     separator()
-    display_dir_tree(percentage, repo)
+    display_dir_tree(config, percentage, repo)
     separator()
-    rule_info(config, ownership)
+    global_rule_weight_multiplier = rule_info(config, ownership)
     separator()
     syntax_weights = syntax_info()
     separator()
     semantic_weights = semantic_info(tracked_files, ownership, semantics)
     separator()
-    issue_weights, pr_weights = remote_info(commit_range, repo, config, contributors)
+    repo_management_weights = remote_info(commit_range, repo, config, contributors)
     separator()
+    summary_info(syntax_weights, semantic_weights, repo_management_weights, global_rule_weight_multiplier)
+
 
 if __name__ == '__main__':
     issue = Issue("", "", "", datetime.now(), None, "", "", "")

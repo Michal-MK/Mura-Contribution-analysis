@@ -14,10 +14,13 @@ class Configuration:
     def __init__(self):
         self.full_ownership_min_threshold = 0.8
         self.ownership_min_threshold = 0.2
+        self.rule_violation_multiplier = 0.9
         self.remote_service = "https://gitlab.fi.muni.cz"
         self.gitlab_access_token = ""
         self.github_access_token = ""
         self.default_remote_name = "origin"
+        self.default_branch = "master"
+        self.anonymous_mode = False
 
         self.contributor_map: Optional[List[Tuple[str, str]]] = None
         self.parsed_rules: RuleCollection = RuleCollection([])
@@ -54,9 +57,36 @@ class Configuration:
 
         return ret
 
+
+def list_semantic_analyzers():
+    def dump(info: List[str]):
+        for line in info:
+            print(line)
+        print()
+
+    print(f"{INFO} Semantic analyzers available:")
+    semantics_path = Path("lang-semantics")
+    for fsi in semantics_path.iterdir():
+        info: List[str] = []
+        if fsi.is_dir():
+            info.append(f"{PLUS} Semantic analyzer for .{fsi.name} extension")
+            target = fsi / "target"
+            if target.exists():
+                info.append(f" -> Launch command in 'target': {target.read_text(encoding='utf-8-sig')}")
+            else:
+                info.append(f"{ERROR} -> '{target}' does not exist! I have no idea how to launch this analyzer!")
+                dump(info)
+                continue
+            setup = fsi / "setup"
+            if setup.exists():
+                info.append(f"{WARN} Setup file exists! It contains the following information:")
+                info.append(f"{setup.read_text(encoding='utf-8-sig')}")
+            dump(info)
+
+
 def validate() -> 'Configuration':
     config_path = Path("configuration_data/configuration.txt")
-    rules_path = Path("rule_data/rules.txt")
+    rules_path = Path("configuration_data/rules.txt")
 
     if not config_path.exists():
         raise FileNotFoundError(f"{ERROR} Path {config_path} does not exist!")
@@ -70,6 +100,10 @@ def validate() -> 'Configuration':
 
     configuration = Configuration.load_from_file(config_path, rules_path, verbose=True)
     print(f"{SUCCESS} Configuration loaded successfully!")
+
+    print()
+    list_semantic_analyzers()
+
     return configuration
 
 

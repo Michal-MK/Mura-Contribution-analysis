@@ -1,2 +1,4 @@
 full_ownership_min_threshold = 0.8
 ownership_min_threshold = 0.2
+rule_violation_multiplier = 0.9
+

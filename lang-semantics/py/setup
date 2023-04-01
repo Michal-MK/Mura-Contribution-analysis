@@ -1,0 +1,3 @@
+Semantic analyzer for Python3 projects.
+
+- Make sure the included `requirements.txt` are installed and available to the interpreter specified in `target`.

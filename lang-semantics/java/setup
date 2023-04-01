@@ -1,0 +1,3 @@
+Semantic analyzer for Java projects.
+
+Requires Java 17 to run. Make sure java is in your PATH.
