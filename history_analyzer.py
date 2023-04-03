@@ -121,13 +121,13 @@ class CommitRange:
         status, sout, serr = self.repo.git.execute(cmd, with_extended_output=True)
         if status == 0:
             # Obtain the previous version of the file as a base
-            file_path = repo_p(file_name)
+            file_path = repo_p(file_name) # TODO do not rely on lib.REPO
             self.checkout_file_from(commit_hash, file_path)
             with open(file_path, 'r', encoding='utf-8-sig') as f:
                 content = f.read()
             ret[file_path] = Ownership(len(content.splitlines()))
             for hunk in change.hunks:
-                ret[file_path].add_change(hunk, change.author)
+                ret[file_path].apply_change(hunk, change.author)
 
     def analyze(self, verbose=False) -> AnalysisResult:
         """
@@ -150,8 +150,7 @@ class CommitRange:
                             del ret[change.previous_name]
                         else:
                             self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret)
-                        for hunk in change.hunks:
-                            ret[file_name].add_change(hunk, change.author)
+                        ret[file_name].apply_change(change.hunks, change.author)
                     elif change.hunks and change.hunks[0].mode == 'A':
                         ret[file_name] = Ownership(change.hunks[0].change_end, change.author)
                     elif not change.hunks:
@@ -169,26 +168,27 @@ class CommitRange:
                     ret[file_name].history.append(ret[file_name].changes)
                     ret[file_name].changes = [change.author for _ in range(change.hunks[0].change_end)]
                     ret[file_name]._line_count = change.hunks[0].change_end  # Lines are indexes starting with 1
-                    ret[file_name].line_count = change.hunks[0].change_end - 1
                     continue
 
                 elif file_name in ret and change.hunks and change.hunks[0].mode == 'D':
                     ret[file_name].delete()
                     continue
 
-                for hunk in change.hunks:
-                    if file_name not in ret and hunk.mode == 'D':
-                        continue
-                    if file_name in ret and hunk.mode == 'A':
-                        # This file was added in a previous commit as well as in this commit
-                        # Likely a conflict down the line
-                        print(f"{WARN} File {file_name} was added in a previous commit as well as in this commit.")
-                        print(f"{WARN} Incoming length: {hunk.change_len}, current length: {len(ret[file_name].changes)}")
-                        if hunk.change_len > len(ret[file_name].changes):
-                            print(f"{INFO} Replacing... (This leads to a loss of information)")
-                            ret[file_name] = Ownership(change.hunks[0].change_end, change.author)
-                        continue
-                    ret[file_name].add_change(hunk, change.author)
+                if len(change.hunks) == 1 and change.hunks[0].mode == 'D':
+                    continue
+
+                if len(change.hunks) == 1 and change.hunks[0].mode == 'R':
+                    # This file was added in a previous commit as well as in this commit
+                    # Likely a conflict down the line
+                    print(f"{WARN} File {file_name} was added in a previous commit as well as in this commit.")
+                    h = change.hunks[0]
+                    print(f"{WARN} Incoming length: {h.length_difference}, current length: {len(ret[file_name].changes)}")
+                    if h.length_difference > len(ret[file_name].changes):
+                        print(f"{INFO} Replacing... (This leads to a loss of information)")
+                        ret[file_name] = Ownership(change.hunks[0].change_end, change.author)
+                    continue
+
+                ret[file_name].apply_change(change.hunks, change.author)
 
         if verbose:
             print(f"{INFO} Analyzed {len(ret)} files")
@@ -283,13 +283,13 @@ class FileSection:
         self.change_start = change_start
         self.change_end = change_start + change_len
         self.new_len = change_len
-        self.change_len = change_len - prev_len
+        self.length_difference = change_len - prev_len
         self.prev_file_hexsha = prev_file_hexsha
         self.mode = mode
 
     def __repr__(self):
         return f"FileSection(prev={self.prev_start}-{self.prev_end} ({self.prev_len}), " \
-               f"change={self.change_start}-{self.change_end} ({self.new_len}/{self.change_len}), " \
+               f"change={self.change_start}-{self.change_end} ({self.new_len}), " \
                f"prev_file_hexsha={self.prev_file_hexsha}, mode={self.mode})"
 
 
@@ -314,39 +314,49 @@ class Ownership:
             self.changes = [author]
         self.changes[0] = ''
         self._line_count = init_line_count  # Lines are indexes starting with 1
-        self.line_count = init_line_count - 1
         self.exists = True
+
+    @property
+    def line_count(self) -> int:
+        return self._line_count - 1
 
     def delete(self):
         self.history.append(copy.deepcopy(self.changes))
         self.changes = []
         self._line_count = 0
-        self.line_count = 0
         self.exists = False
 
-    def add_change(self, hunk: FileSection, author: AuthorName) -> None:
+    def apply_change(self, hunks: List[FileSection], author: AuthorName) -> None:
         self.history.append(copy.deepcopy(self.changes))
 
-        assert hunk.mode != 'A', "This function can only be used to add changes to existing files."
+        assert not any(map(lambda x: x.mode in ['A', 'D'], hunks)), "This function can only be used to add changes to existing files."
 
         if self._line_count == -1:
             # This is a binary file
             self.changes[0] = author
             return
 
-        try:
-            assert hunk.change_start >= 0 and hunk.change_start <= self._line_count, \
-                f"Change start {hunk.change_start} is out of bounds for file with {self._line_count} lines."
-        except AssertionError as e:
-            pass
-        if hunk.change_len > 0:
-            for i in range(hunk.change_len):
-                self.changes.insert(hunk.change_start + i, '_')
-            self._line_count = len(self.changes)
-            self.line_count = self._line_count - 1
+        new_file_index_offset = 0
 
-        for i in range(hunk.change_start, hunk.change_end):
-            self.changes[i] = author
+        for hunk in hunks:
+            if hunk.prev_len == 0:
+                # This is an addition
+                for _ in range(hunk.new_len):
+                    self.changes.insert(hunk.change_start + new_file_index_offset, author)
+                    new_file_index_offset += 1
+                    self._line_count += 1
+            elif hunk.new_len == 0:
+                # This is a deletion
+                for _ in range(hunk.prev_len):
+                    self.changes.pop(hunk.prev_start + new_file_index_offset)
+                    new_file_index_offset -= 1
+                    self._line_count -= 1
+            else:
+                # This is a change
+                self.changes[hunk.prev_start + new_file_index_offset:hunk.prev_end + new_file_index_offset] \
+                    = [author for _ in range(hunk.new_len)]
+                self._line_count += hunk.length_difference
+
 
     def __str__(self):
         return f"Ownership(lines={self.line_count}, changes={self.changes})"
@@ -377,7 +387,7 @@ def get_file_changes(commit_range: CommitRange, commit_hash: str, repo: Repo) ->
         matches = HUNK_HEADER_PATTERN.findall(unified_diff_str)
         author = commit.author.name
         assert author is not None, f"Author name is None for commit {commit_hash} ({commit.message})"
-        actual_path = repo_p(diff.b_path) if diff.b_path is not None else repo_p(diff.a_path)
+        actual_path = repo_p(diff.b_path, repo) if diff.b_path is not None else repo_p(diff.a_path, repo)
         if diff.b_path is None:
             ret[actual_path] = Change(author)
             mode = "D"
@@ -386,7 +396,7 @@ def get_file_changes(commit_range: CommitRange, commit_hash: str, repo: Repo) ->
             mode = "A" if diff.new_file else "M"
         if diff.renamed:
             mode = "R"
-            ret[actual_path].previous_name = repo_p(diff.a_path)
+            ret[actual_path].previous_name = repo_p(diff.a_path, repo)
         for match in matches:
             prev_line_start, prev_line_len, line_start, line_len = match
             change_start = int(line_start)

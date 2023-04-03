@@ -206,8 +206,9 @@ def filter_related_groups(groups: List[FileGroup]) -> List[FileGroup]:
     return ret
 
 
-def repo_p(file_name: str):
-    return Path(os.path.join(REPO.common_dir, '..', file_name)).resolve()
+def repo_p(file_name: str, repo: Optional[Repo] = None) -> Path:
+    repository = repo if repo is not None else REPO
+    return (Path(repository.working_dir) / file_name).resolve()
 
 
 class Contributor:

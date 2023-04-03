@@ -50,11 +50,11 @@ class HistoryAnalyzerTest(unittest.TestCase):
 
         self.assertTrue(len(ownership[self.nas_model].hunks) == 3)
         self.assertTrue(ownership[self.nas_model].hunks[0].change_start == 40)
-        self.assertTrue(ownership[self.nas_model].hunks[0].change_len == 1)
+        self.assertTrue(ownership[self.nas_model].hunks[0].length_difference == 1)
         self.assertTrue(ownership[self.nas_model].hunks[1].change_start == 51)
-        self.assertTrue(ownership[self.nas_model].hunks[1].change_len == 1)
+        self.assertTrue(ownership[self.nas_model].hunks[1].length_difference == 1)
         self.assertTrue(ownership[self.nas_model].hunks[2].change_start == 75)
-        self.assertTrue(ownership[self.nas_model].hunks[2].change_len == 1)
+        self.assertTrue(ownership[self.nas_model].hunks[2].length_difference == 1)
 
     def test_analyze_all_changes_by_me_first_commit(self):
         repo = git.Repo(TEST_REPO2)

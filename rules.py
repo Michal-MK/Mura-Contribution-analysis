@@ -60,7 +60,7 @@ class Rule:
 
     def matches(self, ownership: List[ContributionDistribution]) -> bool:
         for file, percentage in ownership:
-            repo_path = repo_p(file)
+            repo_path = repo_p(file) # TODO do not rely on lib.REPO
 
             if repo_path.parent.match(self.directory) and self.file.match(repo_path.name):
                 if self.op_call(percentage, self.amount):

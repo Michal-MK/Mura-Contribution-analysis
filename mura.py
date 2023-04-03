@@ -390,6 +390,13 @@ def file_statistics_info(commit_range: CommitRange, contributors: List[Contribut
     return file_flags
 
 
+def blanks_comments_info(commit_range: CommitRange, history_analysis_result: AnalysisResult,
+                         tracked_files: List[FileGroup], contributors: List[Contributor]):
+    header(f"{BLANKS_COMMENTS} Blanks and comments:")
+    history_analysis_result
+    return None
+
+
 def summary_info(contributors: List[Contributor],
                  syntactic_weights: ContributorWeight,
                  semantic_weights: ContributorWeight,
