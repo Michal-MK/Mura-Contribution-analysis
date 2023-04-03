@@ -55,7 +55,8 @@ def commit_summary(commit: Commit) -> None:
 def stats_for_contributor(contributor: Contributor, commit_range: CommitRange) -> Tuple[int, int]:
     insertions = 0
     deletions = 0
-    for commit in REPO.iter_commits():
+    for commit_sha in commit_range:
+        commit = commit_range.commit(commit_sha)
         if contributor == commit.author and str(commit.hexsha) in commit_range:
             insertions += commit.stats.total['insertions']
             deletions += commit.stats.total['deletions']
@@ -90,10 +91,10 @@ def get_files_with_flags(commit: Commit) -> Dict[str, List[Union[int, List[Any]]
     return result
 
 
-def get_flagged_files_by_contributor(commits: List[str], contributors: List[Contributor]) -> Dict[str, FlaggedFiles]:
+def get_flagged_files_by_contributor(commit_range: CommitRange, contributors: List[Contributor]) -> Dict[str, FlaggedFiles]:
     result = {}
-    for commit_hexsha in commits:
-        commit = REPO.commit(commit_hexsha)
+    for commit_hexsha in commit_range:
+        commit = commit_range.commit(commit_hexsha)
         author = commit.author
         contributor = next((c for c in contributors if c == author), None)
         if contributor is None:
@@ -129,7 +130,7 @@ def _ignored_files() -> List[str]:
     return ret
 
 
-def get_tracked_files(project_root: Optional[Union[Path, Repo]] = None) -> List[FileGroup]:
+def get_tracked_files(project_root: Optional[Union[Path, Repo]] = None, verbose=False) -> List[FileGroup]:
     """
     Find all files that are related, relative to the project root
     :
@@ -142,7 +143,8 @@ def get_tracked_files(project_root: Optional[Union[Path, Repo]] = None) -> List[
         if REPO is None:
             raise ValueError(f"{ERROR} No project_root specified! Did you execute all code blocks above?")
         project_root = REPO
-        print(f"{INFO} Using implicit project at: {project_root.working_dir}.")
+        if verbose:
+            print(f"{INFO} Using implicit project at: {project_root.working_dir}.")
 
     if isinstance(project_root, Repo):
         repo_dir = project_root.working_dir
@@ -163,6 +165,9 @@ def get_tracked_files(project_root: Optional[Union[Path, Repo]] = None) -> List[
             file_group.files.append(Path(root).joinpath(file))
         if file_group.files:
             ret.append(file_group)
+
+    if verbose:
+        print(f"{INFO} Found {len(ret)} groups of related files.")
 
     return ret
 
@@ -232,6 +237,10 @@ class Contributor:
     def __repr__(self):
         return self.__str__()
 
+    @classmethod
+    def unknown(cls):
+        return Contributor('UNKNOWN', 'UNKNOWN')
+
 
 class Percentage:
     # Tuple[Dict[str, List[Tuple[str, float]]], Dict[str, float]]:
@@ -241,7 +250,7 @@ class Percentage:
         self.global_contribution = global_contribution
 
 
-def get_contributors(config: 'Configuration', range: Optional[CommitRange] = None, match_on_name=True,
+def get_contributors(config: 'Configuration', commit_range: Optional[CommitRange] = None, match_on_name=True,
                      match_on_email=True) -> List[Contributor]:
     """
     Get a list of all contributors
@@ -249,8 +258,8 @@ def get_contributors(config: 'Configuration', range: Optional[CommitRange] = Non
     :return: A list of all contributors
     """
     contributors: Set[Contributor] = set()
-    if range is not None:
-        commits = [REPO.commit(x) for x in range]
+    if commit_range is not None:
+        commits = [commit_range.commit(x) for x in commit_range]
     else:
         commits = [x for x in REPO.iter_commits()]
 
@@ -296,6 +305,8 @@ def get_contributors(config: 'Configuration', range: Optional[CommitRange] = Non
             count += 1
 
     return matched_contributors
+
+
 
 
 def find_contributor(contributors: List[Contributor], author: str) -> Optional[Contributor]:

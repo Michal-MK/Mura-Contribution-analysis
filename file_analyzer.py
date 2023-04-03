@@ -1,8 +1,8 @@
 import os
-from typing import List, Dict
+from typing import List, Dict, Optional
 from pathlib import Path
 
-from semantic_analysis import compute_semantic_weight, LangElement
+from semantic_analysis import LangElement
 from semantic_weight_model import SemanticWeightModel
 from syntactic_weight_model import SyntacticWeightModel
 
@@ -29,12 +29,11 @@ class BlankLineHandler:
 
 
 class FileWeight:
-    def __init__(self, file: Path, line_weights: List[float], weight_model: SemanticWeightModel,
-                 semantic_structure: 'LangElement'):
+    def __init__(self, file: Path, line_weights: List[float]):
         self.file = file
         self.line_weights = line_weights
-        self.weight_model = weight_model
-        self.semantic_structure = semantic_structure
+        self.weight_model: Optional[SemanticWeightModel] = None
+        self.semantic_structure: Optional[LangElement] = None
 
     @property
     def total_line_weight(self):
@@ -84,7 +83,7 @@ def has_weight_map(file: Path) -> bool:
     return os.path.isfile(os.path.join(Path(__file__).parent, "lang-syntax", suffix + ".json"))
 
 
-def compute_file_weight(file: Path) -> FileWeight:
+def compute_syntactic_weight(file: Path) -> FileWeight:
     """
     Compute the weight of a file
     :param file: full path to the file
@@ -93,8 +92,7 @@ def compute_file_weight(file: Path) -> FileWeight:
     with open(file, 'r', encoding='UTF-8-SIG') as f:
         lines = f.readlines()
         line_weights = compute_lines_weight(file, lines)
-        model, semantic_weight = compute_semantic_weight(file)
-        return FileWeight(file, line_weights, model, semantic_weight)
+        return FileWeight(file, line_weights)
 
 
 def compute_lines_weight(file: Path, lines: List[str]):

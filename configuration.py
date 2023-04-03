@@ -20,6 +20,7 @@ class Configuration:
         self.github_access_token = ""
         self.default_remote_name = "origin"
         self.default_branch = "master"
+        self.ignore_remote_repo = False
         self.anonymous_mode = False
 
         self.contributor_map: Optional[List[Tuple[str, str]]] = None

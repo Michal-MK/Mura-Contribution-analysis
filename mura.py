@@ -75,7 +75,7 @@ def print_tree(tree, level=0, prefix='', ownership_cache=None):
             new_prefix = prefix + '│   '
         if isinstance(value, dict):
             if all(isinstance(v, float) for v in value.values()):
-                owners_str = ', '.join([f'{owner}: {value * 100:.0f}%' for owner, value in value.items()])
+                owners_str = ', '.join([f'{owner.name}: {value * 100:.0f}%' for owner, value in value.items()])
                 print(f'{prefix}{connector}{name} {CONTRIBUTOR} [{owners_str}]')
             else:
                 sub_ownerships = [calculate_ownership(v, ownership_cache) for v in value.values() if
@@ -84,23 +84,22 @@ def print_tree(tree, level=0, prefix='', ownership_cache=None):
                         and all(sub_ownerships[0] == sub_ownership for sub_ownership in sub_ownerships):
                     print(f'{prefix}{connector}{name}')
                 else:
-                    owners_str = ', '.join([f'{owner}: {value * 100:.0f}%' for owner, value in
+                    owners_str = ', '.join([f'{owner.name}: {value * 100:.0f}%' for owner, value in
                                             calculate_ownership(value, ownership_cache).items()])
                     print(f'{prefix}{connector}{name} {CONTRIBUTOR} [{owners_str}]')
                 print_tree(value, level + 1, new_prefix, ownership_cache)
 
 
-def plot_commits(commits: List[str], contributors: List[Contributor], repo: Repo,
+def plot_commits(commits: List[str], commit_range: CommitRange, contributors: List[Contributor], repo: Repo,
                  force_x_axis_labels=False) -> None:
     commit_data = defaultdict(list)
     min_date = datetime.max.replace(tzinfo=timezone.utc)
     max_date = datetime.min.replace(tzinfo=timezone.utc)
 
     for commit in commits:
-        commit_obj = repo.commit(commit)
-        author = commit_obj.author.name
+        commit_obj = commit_range.commit(commit)
         for contributor in contributors:
-            if author in contributor.aliases or author == contributor.name or author == contributor.email:
+            if contributor == commit_obj.author:
                 committed_date = commit_obj.committed_datetime
                 commit_data[contributor.name].append(date2num(committed_date))
                 min_date = min(min_date, committed_date)
@@ -110,7 +109,7 @@ def plot_commits(commits: List[str], contributors: List[Contributor], repo: Repo
     plt.figure(figsize=(12, 6))
 
     for name, dates in commit_data.items():
-        plt.plot_date(dates, range(len(dates)), label=name)
+        plt.plot_date(sorted(dates), range(len(dates)), label=name)
     plt.legend()
     plt.xticks(rotation=45)
 
@@ -140,7 +139,7 @@ def header(text: str) -> None:
 
 
 def display_contributor_info(commit_range: CommitRange, config: Configuration) -> List[Contributor]:
-    contributors = get_contributors(config, range=commit_range)
+    contributors = get_contributors(config, commit_range=commit_range)
     header(f"{CONTRIBUTOR} Contributors:")
 
     for contrib in contributors:
@@ -156,7 +155,7 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
     commit_distribution: Dict[Contributor, int] = defaultdict(lambda: 0)
 
     for commit in commit_range:
-        author = repo.commit(commit).author.name
+        author = commit_range.commit(commit).author.name
         if author is None:
             continue
         contributor = find_contributor(contributors, author)
@@ -309,6 +308,10 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
         -> ContributorWeight:
     header(f"{REMOTE_REPOSITORY} Remote repository management:")
 
+    if config.ignore_remote_repo:
+        print(f"{INFO} Skipping as 'config.ignore_remote_repo = True'")
+        return {}
+
     start_date = commit_range.hist_commit.committed_datetime
     end_date = commit_range.head_commit.committed_datetime
 
@@ -379,7 +382,7 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
 
 def file_statistics_info(commit_range: CommitRange, contributors: List[Contributor]) \
         -> Dict[str, FlaggedFiles]:
-    file_flags = get_flagged_files_by_contributor([x for x in commit_range], contributors)
+    file_flags = get_flagged_files_by_contributor(commit_range, contributors)
     for contributor in contributors:
         print(f"{CONTRIBUTOR} {contributor})")
         for key, count in file_flags[contributor.name].counts.items():
@@ -387,50 +390,51 @@ def file_statistics_info(commit_range: CommitRange, contributors: List[Contribut
     return file_flags
 
 
-def summary_info(syntactic_weights: ContributorWeight,
+def summary_info(contributors: List[Contributor],
+                 syntactic_weights: ContributorWeight,
                  semantic_weights: ContributorWeight,
                  repo_management_weights: ContributorWeight,
                  global_rule_weight_multiplier: GlobalRuleWeightMultiplier) -> None:
+    sums: Dict[Contributor, float] = defaultdict(lambda: 0.0)
+
+    def print_section(section: ContributorWeight, add=True):
+        if not section:
+            print(f'{INFO} Nothing to show here...')
+            return
+
+        for contributor in contributors:
+            if contributor in section:
+                print(f" -> {contributor.name}: {section[contributor]}")
+                if add:
+                    sums[contributor] = section[contributor]
+
     separator()
     print(f"{WEIGHT} Total weight per contributor for {SYNTAX} Syntax:")
-    for c, w in syntactic_weights.items():
-        print(f" -> {c.name}: {w}")
+    print_section(syntactic_weights)
 
     separator()
     print(f"{WEIGHT} Total weight per contributor for {SEMANTICS} Semantics:")
-    for c, w in semantic_weights.items():
-        print(f" -> {c.name}: {w}")
+    print_section(semantic_weights)
 
     separator()
     print(f"{WEIGHT} Total weight per contributor for {REMOTE_REPOSITORY} Remote repository management:")
-    for c, w in repo_management_weights.items():
-        print(f" -> {c.name}: {w}")
+    print_section(repo_management_weights)
 
     separator()
     print(f"{WEIGHT}{WARN} Weight multiplier for unfulfilled {RULES} Rules:")
-    for c, w in global_rule_weight_multiplier.items():
-        print(f" -> {c.name}: {w}")
+    print_section(global_rule_weight_multiplier, add=False)
 
     separator()
     print(f"{WEIGHT} Total weight per contributor:")
 
-    class ContributorWeightModel:
-        def __init__(self, contributor: Contributor, weight: float):
-            self.contributor = contributor
-            self.weight = weight
-
-    sums = []
-
-    for c in semantic_weights.keys():
-        sums.append(ContributorWeightModel(c, syntactic_weights[c] + semantic_weights[c] + repo_management_weights[c]))
-
-    for weights in sums:
-        weights.weight *= global_rule_weight_multiplier[weights.contributor]
+    for contributor in sums:
+        sums[contributor] *= global_rule_weight_multiplier[contributor]
 
     position = 1
-    for model in sorted(sums, key=lambda x: x.weight, reverse=True):
+    for model in sorted(sums.items(), key=lambda x: x[1], reverse=True):
+        assert isinstance(model, tuple)
         char = NUMBERS[position] if position <= len(NUMBERS) else f"{position}."
-        print(f"{char} -> {model.contributor.name}: {model.weight}")
+        print(f"{char} -> {model[0].name}: {model[1]}")
         position += 1
 
 
@@ -446,7 +450,7 @@ def display_results(repo: git.Repo,
     separator()
     commit_distribution, insertions_deletions = commit_info(commit_range, repo, contributors)
     separator()
-    plot_commits([x for x in commit_range][1:], contributors, repo)
+    plot_commits([x for x in commit_range][1:], commit_range, contributors, repo)
     separator()
     file_flags = file_statistics_info(commit_range, contributors)
     separator()

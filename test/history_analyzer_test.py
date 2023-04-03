@@ -45,7 +45,8 @@ class HistoryAnalyzerTest(unittest.TestCase):
         c_hash = '9d5b319e1302d4bfa79b44c639b1c7de82d6a9c7'
         repo = git.Repo(TEST_REPO2)
         lib.set_repo(repo)
-        ownership = get_file_changes(c_hash, repo)
+        commit_range = CommitRange(c_hash, c_hash, repo)
+        ownership = get_file_changes(commit_range, c_hash, repo)
 
         self.assertTrue(len(ownership[self.nas_model].hunks) == 3)
         self.assertTrue(ownership[self.nas_model].hunks[0].change_start == 40)
@@ -130,28 +131,28 @@ class HistoryAnalyzerTest(unittest.TestCase):
 
 
 def test_find_unmerged_multiple(self):
-        repo = git.Repo(TEST_REPO_UNMERGED_MULTIPLE)
-        lib.set_repo(repo)
-        c_range = CommitRange('HEAD', 'ROOT', repo)
-        unmerged = c_range.find_unmerged_branches(datetime.datetime.now().timestamp())
+    repo = git.Repo(TEST_REPO_UNMERGED_MULTIPLE)
+    lib.set_repo(repo)
+    c_range = CommitRange('HEAD', 'ROOT', repo)
+    unmerged = c_range.find_unmerged_branches(datetime.datetime.now().timestamp())
 
-        unmerged.sort(key=lambda x: x.name)
+    unmerged.sort(key=lambda x: x.name)
 
-        self.assertTrue(len(unmerged) == 2)
-        self.assertTrue(unmerged[1].name == 'branch2')
-        self.assertTrue(unmerged[0].name == 'branch1 some-tag')
+    self.assertTrue(len(unmerged) == 2)
+    self.assertTrue(unmerged[1].name == 'branch2')
+    self.assertTrue(unmerged[0].name == 'branch1 some-tag')
 
-        self.assertTrue(unmerged[1].head == 'a34e9dc8bc9ee55584120e40209ac97bb388fcc9')
-        self.assertTrue(unmerged[0].head == '689a14b3823fafbd6bb927b5409692bdb02eb96a')
+    self.assertTrue(unmerged[1].head == 'a34e9dc8bc9ee55584120e40209ac97bb388fcc9')
+    self.assertTrue(unmerged[0].head == '689a14b3823fafbd6bb927b5409692bdb02eb96a')
 
-        self.assertTrue('932ccb27444ebc67fb3e83e745072902f88ec82b' in unmerged[1].path)
-        self.assertTrue('676ecb3fb829d166ad8594a54b4bd8ae4b503bd5' in unmerged[0].path)
+    self.assertTrue('932ccb27444ebc67fb3e83e745072902f88ec82b' in unmerged[1].path)
+    self.assertTrue('676ecb3fb829d166ad8594a54b4bd8ae4b503bd5' in unmerged[0].path)
 
-        self.assertTrue(unmerged[1].path[0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
-        self.assertTrue(unmerged[0].path[0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
+    self.assertTrue(unmerged[1].path[0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
+    self.assertTrue(unmerged[0].path[0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
 
-        self.assertTrue(len(unmerged[1].path) == 3)
-        self.assertTrue(len(unmerged[0].path) == 3)
+    self.assertTrue(len(unmerged[1].path) == 3)
+    self.assertTrue(len(unmerged[0].path) == 3)
 
 
 if __name__ == '__main__':

@@ -1,9 +1,11 @@
 import subprocess
+import time
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Iterator
 
 from lib import FileGroup
 from semantic_weight_model import SemanticWeightModel
+from uni_chars import *
 
 LANG_SEMANTICS_PATH = Path(__file__).parent / "lang-semantics"
 
@@ -146,6 +148,25 @@ def compute_semantic_weight_grouped(file_group: FileGroup) -> List[Tuple[Semanti
         else:
             ret.append((SemanticWeightModel(), LangElement('root', None, [])))
     return ret
+
+def compute_semantic_weight_result(file_group: List[FileGroup], verbose=False) \
+        -> List[List[Tuple[SemanticWeightModel, 'LangElement']]]:
+    total_groups = len(file_group)
+    counter = 1
+    start = time.time()
+    ret = []
+    for group in file_group:
+        grouped_semantic_weight = compute_semantic_weight_grouped(group)
+        ret.append(grouped_semantic_weight)
+        progress = time.time()
+        if verbose:
+            print(f"{INFO} Semantic analysis: {progress - start:.2f}s => {counter}/{total_groups}")
+            counter += 1
+
+    if verbose:
+        print(f"{SUCCESS} Semantic analysis DONE")
+    return ret
+
 
 
 def has_semantic_parser(file: Path) -> bool:

@@ -62,7 +62,7 @@ class Rule:
         for file, percentage in ownership:
             repo_path = repo_p(file)
 
-            if repo_path.parent.match(self.directory) and self.file.match(str(file)):
+            if repo_path.parent.match(self.directory) and self.file.match(repo_path.name):
                 if self.op_call(percentage, self.amount):
                     return True
         return False

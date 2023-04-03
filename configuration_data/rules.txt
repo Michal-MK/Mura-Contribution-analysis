@@ -1,1 +1,3 @@
 * "*/" ".*Controller.*\.java" >=1
+* "*/" ".*Test.*\.java" >=1
+* "*/" "pom\.xml" >=1

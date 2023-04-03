@@ -39,6 +39,10 @@ def validate_repository(repository_path: str, config: 'Configuration') -> Repo:
         lib.set_repo(repo)
         print(f"{SUCCESS} Repository path '{path}' points to a repository")
 
+        if config.ignore_remote_repo:
+            print(f"{INFO} Skipping remote repositories as 'config.ignore_remote_repo = True'")
+            return repo
+
         url = repo.remotes[config.default_remote_name].url
         remote = repository_hooks.parse_project(url, gitlab_access_token=config.gitlab_access_token,
                                                      github_access_token=config.github_access_token)

@@ -1,6 +1,7 @@
 import copy
 import re
 from collections import deque, defaultdict
+from datetime import timedelta
 from pathlib import Path
 from typing import List, Dict, Tuple, Deque, Optional, DefaultDict, Set
 
@@ -9,7 +10,7 @@ import lib
 
 from lib import Percentage, first_commit, repo_p, Contributor, find_contributor
 
-from git import Repo
+from git import Repo, Commit, Actor
 
 from uni_chars import *
 
@@ -38,6 +39,7 @@ class CommitRange:
     def __init__(self, head: str, hist: str, repo: Optional[Repo] = None, verbose=False):
         self.head = head
         self.hist = hist
+        self.ownership_overrides: Dict[str, str] = {}
         if repo is None:
             if lib.REPO is None:
                 raise ValueError(f"{ERROR} No repository set! Did you evaluate all code blocks above?")
@@ -50,25 +52,42 @@ class CommitRange:
         if self.hist.lower() == 'root':
             self.hist = first_commit(self.repo.commit(self.head)).hexsha
         marks = self.repo.git.execute(["git", "show-ref", "--heads", "--tags"])
-        assert isinstance(marks, str)
+        remote_marks = self.repo.git.execute(['git', 'branch', '-r'])
+        assert isinstance(marks, str) and isinstance(remote_marks, str)
+
+        remote_marked_commits = [y.split() for y in remote_marks.splitlines() if len(y.split()) == 1]
 
         merged_marked_commits = [y.split() for y in marks.splitlines()]
-        marked_commits = [(str(x[0]), str(x[1]).replace('refs/heads/', '').replace('refs/tags/', ''))
-                          for x in merged_marked_commits]
+        marker_list = [(str(x[0]), str(x[1]).replace('refs/heads/', '').replace('refs/tags/', ''))
+                               for x in merged_marked_commits]
 
-        for mk in marked_commits:
+        for name in remote_marked_commits:
+            marker_list.append((self.repo.git.execute(['git', 'rev-parse', name[0]]), name[0]))
+
+        self.marked_commits = dict()
+        for sha, name in marker_list:
+            self.marked_commits[sha] = name
+
+        for mk in self.marked_commits.items():
             if mk[1] == self.head:
                 self.head = mk[0]
             if mk[1] == self.hist:
                 self.hist = mk[0]
 
-        self.head_commit: git.Commit = self.repo.commit(self.head)
-        self.hist_commit: git.Commit = self.repo.commit(self.hist)
+        self.head_commit: Commit = self.commit(self.head)
+        self.hist_commit: Commit = self.commit(self.hist)
 
         if verbose:
             print(f"{SUCCESS} Commit range: {self.head}...{self.hist}")
             print(f" - Final commit on: {self.head_commit.committed_datetime}")
             print(f" - Initial commit on: {self.hist_commit.committed_datetime}")
+
+    def commit(self, commit_hash: str) -> Commit:
+        orig_commit = self.repo.commit(commit_hash)
+        if commit_hash in self.ownership_overrides:
+            orig_commit.author.name = self.ownership_overrides[commit_hash]
+            orig_commit.author.email = f'<OVERRIDEN>{orig_commit.author.name}</OVERRIDEN>'
+        return orig_commit
 
     def __iter__(self):
         for commit in self.compute_path():
@@ -93,7 +112,7 @@ class CommitRange:
         :param file_name:
         :return:
         """
-        commit = self.repo.commit(commit_hash)
+        commit = self.commit(commit_hash)
         self.repo.git.checkout(commit.hexsha, '--', file_name)
 
     def populate_previously_unseen_file(self, change: 'Change', commit_hash: str, file_name: str,
@@ -110,7 +129,7 @@ class CommitRange:
             for hunk in change.hunks:
                 ret[file_path].add_change(hunk, change.author)
 
-    def analyze(self) -> AnalysisResult:
+    def analyze(self, verbose=False) -> AnalysisResult:
         """
         Analyze the repository <repo> from the commit with the hash <historical_commit_hash> to the commit with the hash
         <current_commit_hash>
@@ -121,8 +140,7 @@ class CommitRange:
         ret: Dict[Path, Ownership] = {}
 
         for commit_hash in path:
-            # print(f"Analyzing commit {commit_hash} ({commit.message.rstrip()}) BY: {commit.author}")
-            file_ownership = get_file_changes(commit_hash, self.repo)
+            file_ownership = get_file_changes(self, commit_hash, self.repo)
             for file_name, change in file_ownership.items():
                 if file_name not in ret:
                     if change.hunks and change.hunks[0].mode == 'R':
@@ -164,8 +182,16 @@ class CommitRange:
                     if file_name in ret and hunk.mode == 'A':
                         # This file was added in a previous commit as well as in this commit
                         # Likely a conflict down the line
+                        print(f"{WARN} File {file_name} was added in a previous commit as well as in this commit.")
+                        print(f"{WARN} Incoming length: {hunk.change_len}, current length: {len(ret[file_name].changes)}")
+                        if hunk.change_len > len(ret[file_name].changes):
+                            print(f"{INFO} Replacing... (This leads to a loss of information)")
+                            ret[file_name] = Ownership(change.hunks[0].change_end, change.author)
                         continue
                     ret[file_name].add_change(hunk, change.author)
+
+        if verbose:
+            print(f"{INFO} Analyzed {len(ret)} files")
 
         return ret
 
@@ -176,8 +202,8 @@ class CommitRange:
         """
         main_path = self.compute_path()
 
-        head_date = end_date if end_date is not None else self.repo.commit(self.head).committed_date
-        hist_date = self.repo.commit(self.hist).committed_date
+        head_date = end_date if end_date is not None else self.commit(self.head).committed_date
+        hist_date = self.commit(self.hist).committed_date
 
         reversed_path = list(main_path)
         reversed_path.reverse()
@@ -188,7 +214,7 @@ class CommitRange:
 
         all_in_range = []
         for commit in all_commits:
-            c = self.repo.commit(commit)
+            c = self.commit(commit)
             if c.committed_date <= head_date and c.committed_date >= hist_date:
                 all_in_range.append(commit)
 
@@ -222,13 +248,30 @@ class CommitRange:
                             print(f"The unmerged branch branches again.")
                             break
                         if len(child) == 0:
-                            identifier = (self.repo.git.execute(f'git branch --contains {_parent}').strip() + " " +
-                                          self.repo.git.execute(f'git tag --contains {_parent}').strip()).strip()
+                            if path[-1] in self.marked_commits:
+                                identifier = self.marked_commits[path[-1]]
                             break
                         child = child[0]
                 path.insert(0, parent)
                 ret.append(CommitHistory(identifier, path))
             return ret
+
+    def unmerged_commits_info(self, repository: Repo, contributors: List[Contributor]) -> None:
+        end_date = (self.head_commit.committed_datetime + timedelta(days=1)).timestamp()
+        unmerged_content = self.find_unmerged_branches(end_date)
+
+        for commit_branch in unmerged_content:
+            print(f'{WARN} Unmerged branch: {commit_branch.name}')
+            not_first = False
+            for hexsha in commit_branch.path[::-1]:
+                if not_first:
+                    print(f'{(" " * 19)}{DOWN_ARROW}{(" " * 19)}')
+                not_first = True
+                commit = repository.commit(hexsha)
+                author = commit.author
+                assert isinstance(author, Actor)
+                print(hexsha + f" {RIGHT_ARROW} {COMMIT} Commit: {commit.message.splitlines()[0]} "
+                               f"({find_contributor(contributors, author.name).name})")
 
 
 class FileSection:
@@ -309,14 +352,15 @@ class Ownership:
         return f"Ownership(lines={self.line_count}, changes={self.changes})"
 
 
-def get_file_changes(commit_hash: str, repo: Repo) -> Dict[Path, Change]:
+def get_file_changes(commit_range: CommitRange, commit_hash: str, repo: Repo) -> Dict[Path, Change]:
     """
     Get the ownership of each file in the commit with the hash <commit_hash>
     :param commit_hash: The hash of the commit to analyze
     :param repo: The repository to analyze
     :return: A dictionary mapping each file name to the lines changed by the author of the commit
     """
-    commit = repo.commit(commit_hash)
+    commit = commit_range.commit(commit_hash)
+
     if commit.parents:
         d = commit.parents[0].diff(commit, create_patch=True, unified=0)
     else:
@@ -406,7 +450,7 @@ def construct_unmerged_tree(unmerged_commits: Set[str], all_commits: Set[str], r
             if curr in visited:
                 continue
             visited.add(curr)
-            for parent in repo.commit(curr).parents:
+            for parent in repo.commit(curr).parents: # This can be from repo directly
                 if parent.hexsha in all_commits:
                     ret[parent.hexsha].append(curr)
                     if parent.hexsha in unmerged_commits:
