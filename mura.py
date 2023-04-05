@@ -496,6 +496,7 @@ def lines_blanks_comments_info(repository: Repo,
 
     return None
 
+
 def estimate_hours(dates: List[datetime], max_commit_diff: int = 120, first_commit_addition: int = 120) -> int:
     if len(dates) < 2:
         return 0
@@ -520,7 +521,8 @@ def estimate_hours(dates: List[datetime], max_commit_diff: int = 120, first_comm
 
     return round(hours)
 
-def hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Contributor, Tuple[int,int]]:
+
+def hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Contributor, Tuple[int, int]]:
     header(f"{TIME} Hour estimates:")
 
     commits = [x for x in repository.iter_commits()]
@@ -533,7 +535,7 @@ def hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Co
         c = find_contributor(contributors, commit.author.name)
         commits_by_author[c].append(commit.committed_datetime)
 
-    ret: Dict[Contributor, Tuple[int,int]] = {}
+    ret: Dict[Contributor, Tuple[int, int]] = {}
 
     for contributor in contributors:
         print(f"{CONTRIBUTOR} {contributor.name} has:")
@@ -544,8 +546,23 @@ def hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Co
 
     return ret
 
-def gaussian(base, x, mu, sigma):
-    return base * math.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
+
+def gaussian(configuration: Configuration, input_hours, hour_estimate):
+    return configuration.base_hour_match_weight * \
+        math.exp(-((input_hours - hour_estimate) ** 2) / (2 * hour_estimate * 2 ** 2))
+
+
+def gaussian_weights(configuration: Configuration, hour_estimate: float,
+                     hours: Dict[Contributor, Tuple[int, int]]) -> ContributorWeight:
+    ret: Dict[Contributor, float] = defaultdict(lambda: 0.0)
+    header(f"{WEIGHT} Gaussian weights:")
+    for contributor, commits_hours in hours.items():
+        print(f"{CONTRIBUTOR} {contributor.name}:")
+        weight = gaussian(configuration, hour_estimate, commits_hours[1])
+        print(f" => {weight:.2f} {WEIGHT} Weight gained for: {commits_hours[1]} hours of work.")
+        ret[contributor] += weight
+
+    return ret
 
 
 def summary_info(contributors: List[Contributor],
@@ -553,7 +570,7 @@ def summary_info(contributors: List[Contributor],
                  semantic_weights: ContributorWeight,
                  repo_management_weights: ContributorWeight,
                  global_rule_weight_multiplier: GlobalRuleWeightMultiplier,
-                 hours: Dict[Contributor, Tuple[int,int]]) -> None:
+                 hours: ContributorWeight) -> None:
     sums: Dict[Contributor, float] = defaultdict(lambda: 0.0)
 
     def print_section(section: ContributorWeight, add=True):
@@ -578,6 +595,10 @@ def summary_info(contributors: List[Contributor],
     separator()
     print(f"{WEIGHT} Total weight per contributor for {REMOTE_REPOSITORY} Remote repository management:")
     print_section(repo_management_weights)
+
+    separator()
+    print(f"{WEIGHT} Total weight per contributor for {TIME} Estimated hours:")
+    print_section(hours)
 
     separator()
     print(f"{WEIGHT}{WARN} Weight multiplier for unfulfilled {RULES} Rules:")
@@ -623,7 +644,10 @@ def display_results(repo: git.Repo,
     separator()
     repo_management_weights = remote_info(commit_range, repo, config, contributors)
     separator()
-    summary_info(contributors, syntax_weights, semantic_weights, repo_management_weights, global_rule_weight_multiplier)
+    hours = gaussian_weights(config, config.hour_estimate, hour_estimates(contributors, repo))
+    separator()
+    summary_info(contributors, syntax_weights, semantic_weights, repo_management_weights, global_rule_weight_multiplier,
+                 hours)
 
 
 if __name__ == '__main__':

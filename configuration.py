@@ -15,6 +15,8 @@ class Configuration:
         self.full_ownership_min_threshold = 0.8
         self.ownership_min_threshold = 0.2
         self.rule_violation_multiplier = 0.9
+        self.base_hour_match_weight = 200.0
+        self.hour_estimate = 24.0
         self.remote_service = "https://gitlab.fi.muni.cz"
         self.gitlab_access_token = ""
         self.github_access_token = ""
