@@ -36,7 +36,6 @@ def validate_repository(repository_path: str, config: 'Configuration') -> Repo:
 
     try:
         repo = Repo(path)
-        lib.set_repo(repo)
         print(f"{SUCCESS} Repository path '{path}' points to a repository")
 
         if config.ignore_remote_repo:

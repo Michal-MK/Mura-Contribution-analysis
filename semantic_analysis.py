@@ -11,6 +11,7 @@ LANG_SEMANTICS_PATH = Path(__file__).parent / "lang-semantics"
 
 SEMANTIC_ANALYZERS: Dict[str, 'LangSemantics'] = {}
 
+
 class LangElement:
     def __init__(self, kind: str, parent: Optional['LangElement'], children: List['LangElement']) -> None:
         self.kind = kind
@@ -18,6 +19,11 @@ class LangElement:
         self.children = children
         self.start = 0
         self.end = 0
+
+    def iterate(self) -> Iterator['LangElement']:
+        yield self
+        for child in self.children:
+            yield from child.iterate()
 
     @property
     def classes(self) -> Iterator['LangElement']:
@@ -81,10 +87,10 @@ class LangElement:
 
         if property_or_field_count > weight_model.property_field_upper_limit:
             property_or_field_count_multiplier = weight_model.property_field_upper_limit_multiplier - 0.05 * (
-                        property_or_field_count - 20)
+                    property_or_field_count - 20)
         elif property_or_field_count < weight_model.property_field_lower_limit:
             property_or_field_count_multiplier = weight_model.property_field_lower_limit_multiplier - 0.05 * (
-                        4 - property_or_field_count)
+                    4 - property_or_field_count)
 
         weight += base_property_or_field_weight * property_or_field_count_multiplier
 
@@ -149,6 +155,7 @@ def compute_semantic_weight_grouped(file_group: FileGroup) -> List[Tuple[Semanti
             ret.append((SemanticWeightModel(), LangElement('root', None, [])))
     return ret
 
+
 def compute_semantic_weight_result(file_group: List[FileGroup], verbose=False) \
         -> List[List[Tuple[SemanticWeightModel, 'LangElement']]]:
     total_groups = len(file_group)
@@ -166,7 +173,6 @@ def compute_semantic_weight_result(file_group: List[FileGroup], verbose=False) \
     if verbose:
         print(f"{SUCCESS} Semantic analysis DONE")
     return ret
-
 
 
 def has_semantic_parser(file: Path) -> bool:

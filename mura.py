@@ -1,4 +1,6 @@
+import math
 import os
+import sys
 from datetime import datetime, timezone, timedelta
 from typing import Tuple, List, Dict, Optional
 
@@ -9,8 +11,8 @@ from matplotlib.dates import date2num, DateFormatter, drange
 
 from configuration import Configuration
 from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
-from lib import FileGroup, Contributor, get_contributors, set_repo, compute_file_ownership, find_contributor, \
-    stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles
+from lib import FileGroup, Contributor, get_contributors, compute_file_ownership, find_contributor, \
+    stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles, repo_p
 from remote_repository_weight_model import RemoteRepositoryWeightModel
 from repository_hooks import parse_project, Issue
 from semantic_analysis import LangElement
@@ -205,16 +207,16 @@ def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int,
     plt.show()
 
 
-def percentage_info(syntax: AnalysisResult, contributors: List[Contributor], config: Configuration) \
+def percentage_info(analysis_result: AnalysisResult, contributors: List[Contributor], config: Configuration) \
         -> Tuple[Percentage, Dict[Contributor, List[ContributionDistribution]]]:
     header(f'{PERCENTAGE} Percentage of tracked files:')
 
-    percentage = calculate_percentage(contributors, syntax)
+    percentage = calculate_percentage(contributors, analysis_result)
 
     for contributor_name, percent in percentage.global_contribution.items():
         print(f'\t{contributor_name}: {percent:.2%}')
 
-    ownership = compute_file_ownership(percentage, contributors, config)
+    ownership = compute_file_ownership(percentage, config)
 
     for contributor, contribution in ownership.items():
         print(f"Files owned by {CONTRIBUTOR} {contributor.name}")
@@ -238,7 +240,7 @@ def display_dir_tree(config: Configuration, percentage: Percentage, repo: Repo):
     print_tree(tree)
 
 
-def rule_info(config: Configuration, ownership: Dict[Contributor, List[ContributionDistribution]]) \
+def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]]) \
         -> GlobalRuleWeightMultiplier:
     header(f"{RULES} Rules: ")
 
@@ -250,7 +252,7 @@ def rule_info(config: Configuration, ownership: Dict[Contributor, List[Contribut
     print()
     header(f"{VIOLATED_RULES} Violated Rules: ")
 
-    rule_result = config.parsed_rules.matches(ownership)
+    rule_result = config.parsed_rules.matches(repo, ownership)
 
     for c, rules in rule_result.items():
         rules_format = [('\t' + str(rule) + os.linesep) for rule in rules]
@@ -390,18 +392,168 @@ def file_statistics_info(commit_range: CommitRange, contributors: List[Contribut
     return file_flags
 
 
-def blanks_comments_info(commit_range: CommitRange, history_analysis_result: AnalysisResult,
-                         tracked_files: List[FileGroup], contributors: List[Contributor]):
+def get_all_comments(element: LangElement) -> List[LangElement]:
+    comments = []
+    for child in element.children:
+        if child.kind == 'comment':
+            comments.append(child)
+        else:
+            comments.extend(get_all_comments(child))
+    return comments
+
+
+def constructs_info(tracked_files: List[FileGroup],
+                    ownership: Dict[Contributor, List[ContributionDistribution]],
+                    semantic_analysis_grouped_result: List[List[Tuple[SemanticWeightModel, 'LangElement']]]):
+    header(f"{SEMANTICS} Constructs:")
+    user_constructs: Dict[Contributor, Dict[str, int]] = defaultdict(lambda: defaultdict(lambda: 0))
+    for i in range(len(tracked_files)):
+        file_group = tracked_files[i]
+        semantic_group = semantic_analysis_grouped_result[i]
+        for j in range(len(file_group.files)):
+            file = file_group.files[j]
+            owner = get_owner(ownership, file)
+            element = semantic_group[j][1]
+            for child in element.iterate():
+                if child.kind == 'root':
+                    continue
+                if owner is None:
+                    continue
+                user_constructs[owner][child.kind] += 1
+
+    for contrib, stats in user_constructs.items():
+        print(f"{CONTRIBUTOR} {contrib.name} Owns:")
+        for key, value in stats.items():
+            print(f" => {key} - {value}")
+
+
+def lines_blanks_comments_info(repository: Repo,
+                               ownership: Dict[Contributor, List[ContributionDistribution]],
+                               semantic_analysis_grouped_result: List[List[Tuple[SemanticWeightModel, 'LangElement']]],
+                               tracked_files: List[FileGroup], contributors: List[Contributor]):
     header(f"{BLANKS_COMMENTS} Blanks and comments:")
-    history_analysis_result
+
+    total_lines = 0
+    tracked_file_count = 0
+    largest_files = [(0, Path()) for _ in range(5)]
+    smallest_files = [(sys.maxsize, Path()) for _ in range(5)]
+
+    smallest_index = 0
+    largest_index = 0
+
+    for i in range(len(tracked_files)):
+        file_group = tracked_files[i]
+        for j in range(len(file_group.files)):
+            file = file_group.files[j]
+            element = semantic_analysis_grouped_result[i][j][1]
+            # print(f"{INFO} File: {file.name}")
+            lines = element.end
+            # print(f"{INFO} Lines: {lines}")
+            total_lines += lines
+            if element.children:
+                if lines < smallest_files[largest_index][0]:
+                    smallest_files[largest_index] = (lines, file)
+                    largest_index = smallest_files.index(max(smallest_files, key=lambda x: x[0]))
+                if lines > largest_files[smallest_index][0]:
+                    largest_files[smallest_index] = (lines, file)
+                    smallest_index = largest_files.index(min(largest_files, key=lambda x: x[0]))
+            tracked_file_count += 1
+
+    print(f"{INFO} Total lines: {total_lines} across {tracked_file_count} files.")
+
+    print(f"{INFO} Largest files:")
+    for x in sorted(largest_files, key=lambda x: x[0], reverse=True):
+        owner = get_owner(ownership, x[1])
+        name = owner.name if owner is not None else "None"
+        print(f" => {repo_p(str(x[1]), repository)} ({x[0]}) by {CONTRIBUTOR}: {name}")
+    print(f"{INFO} Smallest files:")
+    for x in sorted(smallest_files, key=lambda x: x[0]):
+        owner = get_owner(ownership, x[1])
+        name = owner.name if owner is not None else "None"
+        print(f" => {repo_p(str(x[1]), repository)} ({x[0]}) by {CONTRIBUTOR}: {name}")
+
+    print(f"{INFO} Blanks and comments in final version...")
+
+    total_comments = 0
+    file_count = 0
+
+    for i in range(len(tracked_files)):
+        file_group = tracked_files[i]
+        for j in range(len(file_group.files)):
+            file = file_group.files[j]
+            element = semantic_analysis_grouped_result[i][j][1]
+            # print(f"{INFO} File: {file.name}")
+            comments = get_all_comments(element)
+            # print(f"{INFO} Comments: {len(comments)}")
+            file_comments = sum(map(lambda x: x.end - x.start, comments))
+            total_comments += file_comments
+            file_count += 1 if file_comments > 0 else 0
+            # print(f"{INFO} Lines length: {file_comments}")
+
+    print(f" => Total comments: {total_comments} lines across {file_count} files.")
+
+    print(f"{PERCENT} Comment to code ratio: {(total_comments / total_lines) * 100:.2f}%")
+
     return None
+
+def estimate_hours(dates: List[datetime], max_commit_diff: int = 120, first_commit_addition: int = 120) -> int:
+    if len(dates) < 2:
+        return 0
+
+    # Oldest commit first, newest last
+    sortedDates = sorted(dates)
+    allButLast = sortedDates[:-1]
+
+    hours = 0.0
+    for index, date in enumerate(allButLast):
+        nextDate = sortedDates[index + 1]
+        diffInMinutes = (nextDate - date).total_seconds() / 60
+
+        # Check if commits are counted to be in same coding session
+        if diffInMinutes < max_commit_diff:
+            hours += (diffInMinutes / 60)
+        else:
+            # The date difference is too big to be inside single coding session
+            # The work of first commit of a session cannot be seen in git history,
+            # so we make a blunt estimate of it
+            hours += (first_commit_addition / 60)
+
+    return round(hours)
+
+def hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Contributor, Tuple[int,int]]:
+    header(f"{TIME} Hour estimates:")
+
+    commits = [x for x in repository.iter_commits()]
+
+    commits_by_author = defaultdict(lambda: [])
+
+    for commit in commits:
+        if commit.author.name is None:
+            continue
+        c = find_contributor(contributors, commit.author.name)
+        commits_by_author[c].append(commit.committed_datetime)
+
+    ret: Dict[Contributor, Tuple[int,int]] = {}
+
+    for contributor in contributors:
+        print(f"{CONTRIBUTOR} {contributor.name} has:")
+        print(f" => {len(commits_by_author[contributor])} commits")
+        hours = estimate_hours(commits_by_author[contributor])
+        print(f" => {TIME} ~{hours} hours of work")
+        ret[contributor] = (len(commits_by_author[contributor]), hours)
+
+    return ret
+
+def gaussian(base, x, mu, sigma):
+    return base * math.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
 
 
 def summary_info(contributors: List[Contributor],
                  syntactic_weights: ContributorWeight,
                  semantic_weights: ContributorWeight,
                  repo_management_weights: ContributorWeight,
-                 global_rule_weight_multiplier: GlobalRuleWeightMultiplier) -> None:
+                 global_rule_weight_multiplier: GlobalRuleWeightMultiplier,
+                 hours: Dict[Contributor, Tuple[int,int]]) -> None:
     sums: Dict[Contributor, float] = defaultdict(lambda: 0.0)
 
     def print_section(section: ContributorWeight, add=True):
@@ -413,7 +565,7 @@ def summary_info(contributors: List[Contributor],
             if contributor in section:
                 print(f" -> {contributor.name}: {section[contributor]}")
                 if add:
-                    sums[contributor] = section[contributor]
+                    sums[contributor] += section[contributor]
 
     separator()
     print(f"{WEIGHT} Total weight per contributor for {SYNTAX} Syntax:")
@@ -441,7 +593,7 @@ def summary_info(contributors: List[Contributor],
     for model in sorted(sums.items(), key=lambda x: x[1], reverse=True):
         assert isinstance(model, tuple)
         char = NUMBERS[position] if position <= len(NUMBERS) else f"{position}."
-        print(f"{char} -> {model[0].name}: {model[1]}")
+        print(f"{char} -> {model[0].name}: {model[1]:.2f}")
         position += 1
 
 
@@ -451,8 +603,6 @@ def display_results(repo: git.Repo,
                     tracked_files: List[FileGroup],
                     semantics: List[List[Tuple[SemanticWeightModel, 'LangElement']]],
                     config: Configuration) -> None:
-    set_repo(repo)
-
     contributors = display_contributor_info(commit_range, config)
     separator()
     commit_distribution, insertions_deletions = commit_info(commit_range, repo, contributors)
@@ -465,7 +615,7 @@ def display_results(repo: git.Repo,
     separator()
     display_dir_tree(config, percentage, repo)
     separator()
-    global_rule_weight_multiplier = rule_info(config, ownership)
+    global_rule_weight_multiplier = rule_info(config, repo, ownership)
     separator()
     syntax_weights = syntax_info()
     separator()
@@ -473,7 +623,7 @@ def display_results(repo: git.Repo,
     separator()
     repo_management_weights = remote_info(commit_range, repo, config, contributors)
     separator()
-    summary_info(syntax_weights, semantic_weights, repo_management_weights, global_rule_weight_multiplier)
+    summary_info(contributors, syntax_weights, semantic_weights, repo_management_weights, global_rule_weight_multiplier)
 
 
 if __name__ == '__main__':

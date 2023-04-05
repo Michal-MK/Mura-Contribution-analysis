@@ -26,7 +26,7 @@ class FileAnalyzerTest(unittest.TestCase):
 
     def test_deletions(self):
         repo = git.Repo(deletions)
-        c_range = CommitRange('HEAD', 'ROOT', repo)
+        c_range = CommitRange(repo, 'HEAD', 'ROOT')
         result = c_range.analyze()
 
         file = list(result.values())[0]
@@ -34,20 +34,20 @@ class FileAnalyzerTest(unittest.TestCase):
         content = file.history[1]
 
         self.assertTrue(file.line_count == 5)
-        self.assertTrue(content[0] == '')
-        self.assertTrue(content[1] == 'Michal-MK')
-        self.assertTrue(content[2] == 'Michal-MK')
-        self.assertTrue(content[3] == 'Michal-MK')
-        self.assertTrue(content[4] == 'Michal-MK')
-        self.assertTrue(content[5] == 'Michal-MK')
+        self.assertTrue(content[0].author == '')
+        self.assertTrue(content[1].author == 'Michal-MK')
+        self.assertTrue(content[2].author == 'Michal-MK')
+        self.assertTrue(content[3].author == 'Michal-MK')
+        self.assertTrue(content[4].author == 'Michal-MK')
+        self.assertTrue(content[5].author == 'Michal-MK')
         self.assertTrue(len(content) == 6)
 
-        self.assertTrue(file.changes[0] == '')
-        self.assertTrue(file.changes[1] == 'Michal-MK')
-        self.assertTrue(file.changes[2] == 'Pepe')
-        self.assertTrue(file.changes[3] == 'Michal-MK')
-        self.assertTrue(file.changes[4] == 'Pepe')
-        self.assertTrue(file.changes[5] == 'Michal-MK')
+        self.assertTrue(file.changes[0].author == '')
+        self.assertTrue(file.changes[1].author == 'Michal-MK')
+        self.assertTrue(file.changes[2].author == 'Pepe')
+        self.assertTrue(file.changes[3].author == 'Michal-MK')
+        self.assertTrue(file.changes[4].author == 'Pepe')
+        self.assertTrue(file.changes[5].author == 'Michal-MK')
         self.assertTrue(len(file.changes) == 6)
 
 

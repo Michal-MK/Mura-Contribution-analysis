@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections import defaultdict
 from pathlib import Path
 from typing import Union, List, Optional, Set, Dict, Tuple, DefaultDict, Any, TYPE_CHECKING
 
@@ -12,7 +13,6 @@ if TYPE_CHECKING:
     from configuration import Configuration
     from history_analyzer import CommitRange
 
-REPO: Repo
 ignore_list = os.path.join(Path(__file__).parent, "data", "ignore-list.txt")
 
 
@@ -28,22 +28,10 @@ class FileGroup:
         return max(set(extensions), key=extensions.count)
 
 
-def set_repo(repo: Union[str, Repo]) -> None:
-    global REPO
-    if isinstance(repo, str):
-        REPO = Repo(repo)
-    else:
-        REPO = repo
-
-
 def first_commit(commit: Commit) -> Commit:
     while commit.parents:
         commit = commit.parents[0]
     return commit
-
-
-def file_contents(commit: Commit, file: str) -> str:
-    return REPO.git.show(f'{commit.hexsha}:{file}')
 
 
 def commit_summary(commit: Commit) -> None:
@@ -91,7 +79,8 @@ def get_files_with_flags(commit: Commit) -> Dict[str, List[Union[int, List[Any]]
     return result
 
 
-def get_flagged_files_by_contributor(commit_range: CommitRange, contributors: List[Contributor]) -> Dict[str, FlaggedFiles]:
+def get_flagged_files_by_contributor(commit_range: CommitRange, contributors: List[Contributor]) -> Dict[
+    str, FlaggedFiles]:
     result = {}
     for commit_hexsha in commit_range:
         commit = commit_range.commit(commit_hexsha)
@@ -108,9 +97,9 @@ def get_flagged_files_by_contributor(commit_range: CommitRange, contributors: Li
     return result
 
 
-def try_checkout(commit_hash: str, force: bool = False) -> None:
+def try_checkout(repo: Repo, commit_hash: str, force: bool = False) -> None:
     try:
-        REPO.git.checkout(commit_hash, force=force)
+        repo.git.checkout(commit_hash, force=force)
     except Exception as e:
         print(f"Failed to checkout {commit_hash} {e} - Are there any uncommitted changes?")
 
@@ -130,7 +119,7 @@ def _ignored_files() -> List[str]:
     return ret
 
 
-def get_tracked_files(project_root: Optional[Union[Path, Repo]] = None, verbose=False) -> List[FileGroup]:
+def get_tracked_files(project_root: Union[Path, Repo], verbose=False) -> List[FileGroup]:
     """
     Find all files that are related, relative to the project root
     :
@@ -140,11 +129,7 @@ def get_tracked_files(project_root: Optional[Union[Path, Repo]] = None, verbose=
     ret: List[FileGroup] = []
 
     if project_root is None:
-        if REPO is None:
-            raise ValueError(f"{ERROR} No project_root specified! Did you execute all code blocks above?")
-        project_root = REPO
-        if verbose:
-            print(f"{INFO} Using implicit project at: {project_root.working_dir}.")
+        raise ValueError(f"{ERROR} No project_root specified! Did you execute all code blocks above?")
 
     if isinstance(project_root, Repo):
         repo_dir = project_root.working_dir
@@ -206,9 +191,12 @@ def filter_related_groups(groups: List[FileGroup]) -> List[FileGroup]:
     return ret
 
 
-def repo_p(file_name: str, repo: Optional[Repo] = None) -> Path:
-    repository = repo if repo is not None else REPO
-    return (Path(repository.working_dir) / file_name).resolve()
+def repo_p(file_name: str, repo: Repo) -> Path:
+    repo_dir = repo.working_dir
+    assert repo_dir is not None
+    if file_name.startswith(repo_dir):
+        return Path(os.path.relpath(file_name, repo_dir))
+    return (Path(repo_dir) / file_name).resolve()
 
 
 class Contributor:
@@ -251,7 +239,7 @@ class Percentage:
         self.global_contribution = global_contribution
 
 
-def get_contributors(config: 'Configuration', commit_range: Optional[CommitRange] = None, match_on_name=True,
+def get_contributors(config: 'Configuration', commit_range: CommitRange, match_on_name=True,
                      match_on_email=True) -> List[Contributor]:
     """
     Get a list of all contributors
@@ -259,10 +247,7 @@ def get_contributors(config: 'Configuration', commit_range: Optional[CommitRange
     :return: A list of all contributors
     """
     contributors: Set[Contributor] = set()
-    if commit_range is not None:
-        commits = [commit_range.commit(x) for x in commit_range]
-    else:
-        commits = [x for x in REPO.iter_commits()]
+    commits = [commit_range.commit(x) for x in commit_range]
 
     for commit in commits:
         contributors.add(Contributor(commit.author.name, commit.author.email))
@@ -308,8 +293,6 @@ def get_contributors(config: 'Configuration', commit_range: Optional[CommitRange
     return matched_contributors
 
 
-
-
 def find_contributor(contributors: List[Contributor], author: str) -> Optional[Contributor]:
     for contributor in contributors:
         if author == contributor.name:
@@ -331,25 +314,18 @@ class ContributionDistribution:
         yield self.percentage
 
     def __str__(self):
-        return f"{os.path.relpath(self.file, REPO.working_dir)} ({self.percentage})"
+        return f"{self.file} ({self.percentage})"
 
 
-def compute_file_ownership(percentage: Percentage, contributors: List[Contributor], config: Configuration) \
+def compute_file_ownership(percentage: Percentage, config: Configuration) \
         -> Dict[Contributor, List[ContributionDistribution]]:
-    ret: Dict[Contributor, List[ContributionDistribution]] = {}
+    ret: Dict[Contributor, List[ContributionDistribution]] = defaultdict(list)
     for file, percentages in percentage.file_per_contributor.items():
         for contributor, contrib_percent in percentages:
-            if contributor == '' or contributor == '_':
-                # No author name comes from incomplete git history (starting from a certain commit)
-                # Placeholder name '_' indicates 0 line index (no contribution) and trailing newline
-                continue
-            contrib = find_contributor(contributors, contributor)
-            if contrib not in ret:
-                ret[contrib] = []
             if contrib_percent > config.full_ownership_min_threshold:
-                ret[contrib].append(ContributionDistribution(file, 1))
-            elif contrib_percent < config.ownership_min_threshold:
-                continue
-            else:
-                ret[contrib].append(ContributionDistribution(file, contrib_percent))
+                ret[contributor].append(ContributionDistribution(file, 1))
+            # elif contrib_percent < config.ownership_min_threshold:
+            #     continue
+            # else:
+            #     ret[contributor].append(ContributionDistribution(file, contrib_percent))
     return ret

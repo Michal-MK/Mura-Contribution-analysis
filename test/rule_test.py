@@ -1,8 +1,9 @@
 import unittest
+from pathlib import Path
 
 from git import Repo
 
-from lib import ContributionDistribution, Contributor, set_repo
+from lib import ContributionDistribution, Contributor
 from rules import parse_rules
 from environment_local import TURTLE_GRAPHICS_REPO
 
@@ -10,33 +11,29 @@ from environment_local import TURTLE_GRAPHICS_REPO
 class RuleTests(unittest.TestCase):
 
     def setUp(self):
-        set_repo(Repo(TURTLE_GRAPHICS_REPO))
+        self.repo = Repo(TURTLE_GRAPHICS_REPO)
 
     def test_rule_no_violations(self):
         rules = parse_rules([r'* "*/Models/" ".*Model.*\.cs" >=1'])
 
-        set_repo(Repo(TURTLE_GRAPHICS_REPO))
-
         input = dict()
         input[Contributor("Michal-MK", "michalhz159@gmail.com")] = [
-            ContributionDistribution("./TurtleGraphics/Models/IntelliCommandDialogViewModel.cs", 1),
-            ContributionDistribution("./TurtleGraphics/Models/LanguageButtonModel.cs", 1),
+            ContributionDistribution(Path("./TurtleGraphics/Models/IntelliCommandDialogViewModel.cs"), 1),
+            ContributionDistribution(Path("./TurtleGraphics/Models/LanguageButtonModel.cs"), 1),
         ]
 
-        result = rules.matches(input)
+        result = rules.matches(self.repo, input)
         self.assertFalse(result)
     def test_rule_one_violation(self):
         rules = parse_rules([r'* "*/Models/" "[a-zA-Z_][a-zA-Z0-9_]*Model[a-zA-Z_][a-zA-Z0-9_]*\.cs" >=1'])
 
-        set_repo(Repo(TURTLE_GRAPHICS_REPO))
-
         input = dict()
         input[Contributor("Michal-MK", "michalhz159@gmail.com")] = [
-            ContributionDistribution("./TurtleGraphics/Models/IntelliCommandDialogView.cs", 1),
-            ContributionDistribution("./TurtleGraphics/Models/LanguageButton.cs", 1),
+            ContributionDistribution(Path("./TurtleGraphics/Models/IntelliCommandDialogView.cs"), 1),
+            ContributionDistribution(Path("./TurtleGraphics/Models/LanguageButton.cs"), 1),
         ]
 
-        result = rules.matches(input)
+        result = rules.matches(self.repo, input)
         self.assertTrue(result)
         contributor = Contributor("Michal-MK", "michalhz159@gmail.com")
         self.assertTrue(list(result.keys()) == [contributor])

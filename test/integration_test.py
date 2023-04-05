@@ -6,7 +6,7 @@ import git
 
 from configuration import Configuration
 from history_analyzer import CommitRange
-from lib import get_tracked_files, set_repo
+from lib import get_tracked_files
 from mura import display_results
 from semantic_analysis import compute_semantic_weight_grouped
 from environment_local import TWO_CONTRIB_REPO
@@ -17,8 +17,7 @@ class IntegrationTest(unittest.TestCase):
     @unittest.skip("Too long")
     def test_integration_one(self):
         repo = git.Repo(TWO_CONTRIB_REPO)
-        set_repo(repo)
-        range = CommitRange("HEAD", "c1c8eb0afaa9cec949b1601720d66fe4b6bcce31", repo)
+        range = CommitRange(repo, "HEAD", "c1c8eb0afaa9cec949b1601720d66fe4b6bcce31")
         config = Configuration.load_from_file(Path("configuration_data/configuration.txt"),
                                               Path("configuration_data/rules.txt"))
         result = range.analyze()
@@ -45,8 +44,7 @@ class IntegrationTest(unittest.TestCase):
             with open("./" + r.name + ".txt", "w", encoding='UTF-8') as f:
                 with redirect_stdout(f):
                     repo = git.Repo(r)
-                    set_repo(repo)
-                    range = CommitRange("HEAD", "ROOT", repo)
+                    range = CommitRange(repo, "HEAD", "ROOT")
                     config = Configuration.load_from_file(Path("configuration_data/configuration.txt"),
                                                           Path("configuration_data/rules.txt"))
                     result =  range.analyze()

@@ -5,6 +5,8 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Dict
 
+from git import Repo
+
 from lib import ContributionDistribution, Contributor, repo_p
 from uni_chars import *
 
@@ -58,9 +60,9 @@ class Rule:
     def all_contributors(self):
         return self.contributor == "*"
 
-    def matches(self, ownership: List[ContributionDistribution]) -> bool:
+    def matches(self, repo: Repo, ownership: List[ContributionDistribution]) -> bool:
         for file, percentage in ownership:
-            repo_path = repo_p(file) # TODO do not rely on lib.REPO
+            repo_path = repo_p(str(file), repo)
 
             if repo_path.parent.match(self.directory) and self.file.match(repo_path.name):
                 if self.op_call(percentage, self.amount):
@@ -92,7 +94,7 @@ class RuleCollection:
     def __init__(self, rules: List[Rule]):
         self.rules = rules
 
-    def matches(self, ownership: Dict[Contributor, List[ContributionDistribution]]) -> Dict[Contributor, List[Rule]]:
+    def matches(self, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]]) -> Dict[Contributor, List[Rule]]:
         """
         Matches the rule_data against the ownership, returning a dictionary of contributors and the rule_data that they violate.
 
@@ -103,7 +105,7 @@ class RuleCollection:
         for actor in ownership.keys():
             for rule in self.rules:
                 if rule.all_contributors or rule.contributor == actor:
-                    if not rule.matches(ownership[actor]):
+                    if not rule.matches(repo, ownership[actor]):
                         if actor not in ret:
                             ret[actor] = []
                         ret[actor].append(rule)
