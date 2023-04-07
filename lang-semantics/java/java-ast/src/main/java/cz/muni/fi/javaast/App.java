@@ -7,6 +7,7 @@ import com.puppycrawl.tools.checkstyle.api.TokenTypes;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 
@@ -18,23 +19,26 @@ import java.util.stream.Collectors;
 public class App {
     public static void main(String[] args) {
         try {
-            if (args.length != 2) {
-                System.out.println("Usage: java -jar javaast.jar <path_to_declarations.json> <path_to_file.java>");
+            if (args.length < 2) {
+                System.out.println("Usage: java -jar javaast.jar <path_to_declarations.json> <path_to_file.java>...");
                 return;
             }
-            new App().parse(args[0], args[1]);
+            new App().parse(args[0], Arrays.stream(args).skip(1).toArray(String[]::new));
         } catch (CheckstyleException | IOException e) {
             System.out.println("Error: " + e.getMessage());
         }
     }
 
-    private void parse(String declarationsFile, String javaFile) throws CheckstyleException, IOException {
-        DetailAST result = JavaParser.parseFile(new File(javaFile), JavaParser.Options.WITH_COMMENTS);
+    private void parse(String declarationsFile, String[] javaFiles) throws CheckstyleException, IOException {
+        for (String javaFile : javaFiles) {
+            System.out.println(javaFile);
+            DetailAST result = JavaParser.parseFile(new File(javaFile), JavaParser.Options.WITH_COMMENTS);
 
-        String content = Files.readString(Paths.get(declarationsFile));
-        JSONArray declarations = new JSONArray(content);
+            String content = Files.readString(Paths.get(declarationsFile));
+            JSONArray declarations = new JSONArray(content);
 
-        analyze(declarations.toList().stream().map(Object::toString).collect(Collectors.toList()), result);
+            analyze(declarations.toList().stream().map(Object::toString).collect(Collectors.toList()), result);
+        }
     }
 
     private static final HashMap<Integer, String> TYPE_MAP = new HashMap<>() {{
@@ -53,7 +57,7 @@ public class App {
 
         var type = token.getType();
 
-        if (TYPE_MAP.keySet().stream().anyMatch(t -> t == type) && declarations.contains(TYPE_MAP.get(type)) ) {
+        if (TYPE_MAP.keySet().stream().anyMatch(t -> t == type) && declarations.contains(TYPE_MAP.get(type))) {
             if (type != TokenTypes.VARIABLE_DEF || !hasMethodParent(token)) {
                 printToken(token);
             }

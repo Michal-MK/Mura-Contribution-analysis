@@ -24,6 +24,7 @@ class Configuration:
         self.default_branch = "master"
         self.ignore_remote_repo = False
         self.anonymous_mode = False
+        self.ignored_extensions: List[str] = []
 
         self.contributor_map: Optional[List[Tuple[str, str]]] = None
         self.parsed_rules: RuleCollection = RuleCollection([])
@@ -75,7 +76,7 @@ def list_semantic_analyzers():
             info.append(f"{PLUS} Semantic analyzer for .{fsi.name} extension")
             target = fsi / "target"
             if target.exists():
-                info.append(f" -> Launch command in 'target': {target.read_text(encoding='utf-8-sig')}")
+                info.append(f"{LAUNCH} Launch command in 'target': {target.read_text(encoding='utf-8-sig')}")
             else:
                 info.append(f"{ERROR} -> '{target}' does not exist! I have no idea how to launch this analyzer!")
                 dump(info)

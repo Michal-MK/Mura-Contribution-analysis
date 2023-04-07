@@ -5,7 +5,8 @@ from datetime import timedelta
 from pathlib import Path
 from typing import List, Dict, Tuple, Deque, Optional, DefaultDict, Set
 
-from lib import Percentage, first_commit, repo_p, Contributor, find_contributor
+from configuration import Configuration
+from lib import Percentage, first_commit, repo_p, Contributor, find_contributor, posix_repo_p
 
 from git import Repo, Commit, DiffIndex
 
@@ -21,11 +22,38 @@ ROOT_HASH = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 HUNK_HEADER_PATTERN: re.Pattern[str] = re.compile(
     r"@@ -(\d+)(?:,(\d+))? \+(?P<change_start>\d+)(?:,(?P<change_end>\d+))? @@")
 
+HUNK_CONFLICT_PATTERN: re.Pattern[str] = re.compile(
+    r"@@@ -(\d+)(?:,(\d+))? -(\d+)(?:,(\d+))? \+(?P<change_start>\d+)(?:,(?P<change_end>\d+))? @@@")
+
+CONFLICT_A_NAME: re.Pattern = re.compile(r"--- a/(.*)\s")
+CONFLICT_B_NAME: re.Pattern = re.compile(r"\+\+\+ b/(.*)\s")
+
 
 class LineMetadata:
-    def __init__(self, author='', is_blank=False):
+    def __init__(self, author='', content: str = ''):
         self.author = author
-        self.is_blank = is_blank
+        self.content = content
+
+    @property
+    def is_blank(self):
+        return self.content == '' or self.content.strip() == ''
+
+    def __str__(self):
+        return f"{self.author}: {self.content}"
+
+    def __repr__(self):
+        return self.__str__()
+
+class UnapplicableHunk:
+    def __init__(self, ownership: 'Ownership', hunk: 'FileSection'):
+        self.hunk = hunk
+        self.ownership = ownership
+
+    def __str__(self):
+        return f"{self.hunk} is not applicable to {self.ownership}"
+
+    def __repr__(self):
+        return self.__str__()
 
 
 class CommitHistory:
@@ -94,40 +122,40 @@ class CommitRange:
         for commit in self.compute_path():
             yield commit
 
-    def compute_path(self) -> Deque[str]:
+    def compute_path(self, include_merge_commits=False) -> Deque[str]:
         """
         Compute the path from <current_commit_hash> to <historical_commit_hash> in the <repo>
         :return: A list of commit hashes sorted from <current_commit_hash> to <historical_commit_hash>
         """
         c_range = f"{self.head}...{self.hist}"
-        output = self.repo.git.execute(["git", "rev-list", "--topo-order", "--ancestry-path", "--reverse", c_range])
+        args = ["--topo-order", "--ancestry-path", "--reverse"]
+        # if not include_merge_commits:
+        #     args.append("--no-merges")
+        output = self.repo.git.execute(["git", "rev-list", *args, c_range])
         assert isinstance(output, str)
         ret = deque(output.splitlines())
         ret.insert(0, self.hist)
         return ret
 
-    def checkout_file_from(self, commit_hash: str, file_name: Path) -> None:
+    def checkout_file_from(self, commit_hash: str, file_name: str) -> str:
         """
         Checkout the file <file_name> from the parent of the commit with the hash <commit_hash>
         :param commit_hash:
         :param file_name:
         :return:
         """
-        commit = self.commit(commit_hash)
-        self.repo.git.checkout(commit.hexsha, '--', file_name)
+        result = self.repo.git.execute(['git', 'show', f'{commit_hash}:{str(file_name)}'])
+        assert isinstance(result, str)
+        return result
 
     def populate_previously_unseen_file(self, change: 'Change', commit_hash: str, file_name: str,
                                         ret: Dict[Path, 'Ownership']) -> None:
-        cmd = ['git', 'cat-file', '-e', change.hunks[0].prev_file_hexsha]
-        status, sout, serr = self.repo.git.execute(cmd, with_extended_output=True)
-        if status == 0:
-            # Obtain the previous version of the file as a base
-            file_path = repo_p(file_name, self.repo)
-            self.checkout_file_from(commit_hash, file_path)
-            with open(file_path, 'r', encoding='utf-8-sig') as f:
-                content = f.read()
-            ret[file_path] = Ownership(len(content.splitlines()), content)
-            ret[file_path].apply_change(change.hunks, change.author)
+        file_path = posix_repo_p(file_name, self.repo)
+        pl_path = Path(file_path)
+        # Obtain the previous version of the file as a base
+        content = self.checkout_file_from(commit_hash, file_path)
+        ret[pl_path] = Ownership(len(content.splitlines(keepends=True)), content)
+        ret[pl_path].apply_change(change.hunks, change.author)
 
     def analyze(self, verbose=False) -> AnalysisResult:
         """
@@ -150,11 +178,13 @@ class CommitRange:
                             del ret[change.previous_name]
                         else:
                             self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret)
-                        ret[file_name].apply_change(change.hunks, change.author)
+                        unapplicable = ret[file_name].apply_change(change.hunks, change.author)
+                        if unapplicable:
+                            print(f"{ERROR}: Unapplicable change in {commit_hash} for file {file_name}. This is fatal.")
                     elif change.hunks and change.hunks[0].mode == 'A':
                         ret[file_name] = Ownership(change.hunks[0].change_end, change.hunks[0].content, change.author)
                     elif not change.hunks:
-                        # This is a binary file
+                        # This is a binary file or empty file
                         ret[file_name] = Ownership(-1, '', change.author)
                     elif change.hunks[0].mode == 'M':
                         # This file already existed in the repo, this can occur if the analysis does not
@@ -182,14 +212,24 @@ class CommitRange:
                     # Likely a conflict down the line
                     print(f"{WARN} File {file_name} was added in a previous commit as well as in this commit.")
                     h = change.hunks[0]
-                    print(
-                        f"{WARN} Incoming length: {h.length_difference}, current length: {len(ret[file_name].changes)}")
-                    if h.length_difference > len(ret[file_name].changes):
-                        print(f"{INFO} Replacing... (This leads to a loss of information)")
-                        ret[file_name] = Ownership(change.hunks[0].change_end, change.hunks[0].content, change.author)
+                    print(f"{WARN} Incoming length: {h.length_difference}, current "
+                          f"length: {len(ret[file_name].changes)}")
+                    print(f"{INFO} Replacing... (This may lead to a loss of information)")
+                    print(f"{INFO} One cause for this is Windows NTFS being case insensitive.")
+                    ret[file_name] = Ownership(change.hunks[0].change_end, change.hunks[0].content, change.author)
+                    print()
                     continue
 
-                ret[file_name].apply_change(change.hunks, change.author)
+                unapplicable = ret[file_name].apply_change(change.hunks, change.author)
+                if unapplicable:
+                    for u in unapplicable:
+                        print(f"{WARN}: Unapplicable change in {commit_hash} for file {file_name}.")
+                        print(f"{WARN}: There is no information in the history of this file to "
+                              f"effectively resolve this conflict.")
+                        print(f"{INFO}: Restoring the file from the current commit. All authorship till now is lost.")
+                        print()
+                        ret[file_name]._apply_conflict_resolution(change.author, u.hunk)
+
 
         if verbose:
             print(f"{INFO} Analyzed {len(ret)} files")
@@ -201,7 +241,7 @@ class CommitRange:
         Find all unmerged branches in the repository <repo>
         :return: A list of all unmerged branches
         """
-        main_path = self.compute_path()
+        main_path = self.compute_path(include_merge_commits=True)
 
         head_date = end_date if end_date is not None else self.commit(self.head).committed_date
         hist_date = self.commit(self.hist).committed_date
@@ -256,8 +296,9 @@ class CommitRange:
                 path.insert(0, parent)
                 ret.append(CommitHistory(identifier, path))
             return ret
+        return []  # No unmerged branches found
 
-    def unmerged_commits_info(self, repository: Repo, contributors: List[Contributor]) -> None:
+    def unmerged_commits_info(self, repository: Repo, config: Configuration, contributors: List[Contributor]) -> None:
         end_date = (self.head_commit.committed_datetime + timedelta(days=1)).timestamp()
         unmerged_content = self.find_unmerged_branches(end_date)
 
@@ -273,6 +314,8 @@ class CommitRange:
                 assert isinstance(author, str)
                 print(hexsha + f" {RIGHT_ARROW} {COMMIT} Commit: {commit.message.splitlines()[0]} "
                                f"({find_contributor(contributors, author).name})")
+        if not unmerged_content:
+            print(f'{SUCCESS} No unmerged branches found! Everything is in the "{config.default_branch}" branch!')
 
 
 class FileSection:
@@ -305,24 +348,33 @@ class Change:
     def add_hunk(self, prev_start: int, prev_len: int, change_start: int, change_len: int,
                  content: str,
                  previous_file_hexsha: bytes, mode: Optional[str] = None) -> None:
-        self.hunks.append(FileSection(prev_start, prev_len, change_start, change_len, content, previous_file_hexsha, mode))
+        self.hunks.append(
+            FileSection(prev_start, prev_len, change_start, change_len, content, previous_file_hexsha, mode))
 
 
 class Ownership:
     def __init__(self, init_line_count: int, initial_content: str, author: str = '') -> None:
         self.history: OwnershipHistory = []
-        self.changes: List[LineMetadata] = [LineMetadata(author) for _ in range(init_line_count)]
+        split = initial_content.splitlines(keepends=True)
+        if split:
+            has_newline = split[-1].endswith('\n')
+            if not has_newline:
+                init_line_count -= 1
+            else:
+                split.append('')
+        else:
+            pass
+            # Empty file or binary file
+        self.changes: List[LineMetadata] = [LineMetadata(author, split[i]) for i in range(init_line_count)]
         if not self.changes or init_line_count == -1:
             # Empty file or binary file
-            self.changes = [LineMetadata(author)]
-        self.changes[0] = LineMetadata('', is_blank=False)
-        self.content = initial_content
-        self._line_count = init_line_count  # Lines are indexes starting with 1
+            self.changes = [LineMetadata(author, '')]
+        self.line_count = init_line_count  # Lines are indexes starting with 1
         self.exists = True
 
     @property
-    def line_count(self) -> int:
-        return self._line_count - 1
+    def content(self):
+        return ''.join(map(lambda x: x.content, self.changes))
 
     def delete(self):
         self.history.append(copy.deepcopy(self.changes))
@@ -330,40 +382,93 @@ class Ownership:
         self._line_count = 0
         self.exists = False
 
-    def apply_change(self, hunks: List[FileSection], author: AuthorName) -> None:
+    def apply_change(self, hunks: List[FileSection], author: AuthorName) -> List[UnapplicableHunk]:
         self.history.append(copy.deepcopy(self.changes))
 
         assert not any(map(lambda x: x.mode in ['A', 'D'],
                            hunks)), "This function can only be used to add changes to existing files."
 
-        if self._line_count == -1:
+        unapplicable_hunks: List[UnapplicableHunk] = []
+
+        if self.line_count == -1:
             # This is a binary file
-            self.changes[0] = LineMetadata(author, is_blank=False)
-            return
+            self.changes[0] = LineMetadata(author, '\1')
+            return unapplicable_hunks
 
         new_file_index_offset = 0
 
         for hunk in hunks:
+            if hunk.mode == 'CONFLICT':
+                self._apply_conflict_resolution(author, hunk)
+                continue
+
             if hunk.prev_len == 0:
                 # This is an addition
-                for _ in range(hunk.new_len):
-                    self.changes.insert(hunk.change_start + new_file_index_offset, LineMetadata(author))
+                split = hunk.content.splitlines(keepends=True)
+                self.fix_length(hunk, split)
+
+                for l in range(1, hunk.new_len + 1):
+                    index = hunk.change_start - 1 + hunk.new_len - l
+                    text = split[index]
+                    self.changes.insert(hunk.prev_start + new_file_index_offset,
+                                        LineMetadata(author, text))
                 new_file_index_offset += hunk.new_len
-                self._line_count += hunk.new_len
+                self.line_count += hunk.new_len
             elif hunk.new_len == 0:
                 # This is a deletion
                 for _ in range(hunk.prev_len):
                     try:
-                        self.changes.pop(hunk.prev_start + new_file_index_offset)
+                        self.changes.pop(hunk.change_start)
                     except IndexError:
                         print(f"IndexError: {hunk.prev_start + new_file_index_offset} {len(self.changes)}")
+                        unapplicable_hunks.append(UnapplicableHunk(self, hunk))
+                        return unapplicable_hunks
+
                 new_file_index_offset -= hunk.prev_len
-                self._line_count -= hunk.prev_len
+                self.line_count -= hunk.prev_len
             else:
+                split = hunk.content.splitlines(keepends=True)
+                self.fix_length(hunk, split)
                 # This is a change
-                self.changes[hunk.prev_start + new_file_index_offset:hunk.prev_end + new_file_index_offset] \
-                    = [LineMetadata(author) for _ in range(hunk.new_len)]
-                self._line_count += hunk.length_difference
+                new_meta = [LineMetadata(author, split[hunk.change_start - 1 + i]) for i in range(hunk.new_len)]
+                file_start = hunk.prev_start - 1 + new_file_index_offset
+                for i in range(hunk.prev_len):
+                    try:
+                        self.changes.pop(file_start)
+                    except IndexError:
+                        print(f"IndexError: {file_start} {len(self.changes)}")
+                        unapplicable_hunks.append(UnapplicableHunk(self, hunk))
+                        return unapplicable_hunks
+
+                for i in range(hunk.new_len):
+                    self.changes.insert(file_start, new_meta[hunk.new_len - 1 - i])
+                new_file_index_offset += hunk.length_difference
+                self.line_count += hunk.length_difference
+
+        return unapplicable_hunks
+
+    def _apply_conflict_resolution(self, author: str, hunk: FileSection):
+        split = hunk.content.splitlines(keepends=True)
+        init_line_count = len(split)
+        if split:
+            has_newline = split[-1].endswith('\n')
+            if not has_newline:
+                init_line_count -= 1
+            else:
+                split.append('')
+        else:
+            pass
+            # Empty file or binary file
+        self.changes = [LineMetadata(author, split[i]) for i in range(init_line_count)]
+        self._line_count = init_line_count
+
+    def fix_length(self, hunk, split):
+        has_newline = split[-1].endswith('\n')
+        had_newline = hunk.content.endswith('\n')
+        if not has_newline and hunk.change_end == len(split) and had_newline:
+            hunk.new_len -= 1
+        elif has_newline and hunk.change_end == len(split) and not had_newline:
+            split.append('')
 
     def __str__(self):
         return f"Ownership(lines={self.line_count}, changes={self.changes})"
@@ -381,7 +486,36 @@ def get_file_changes(commit_range: CommitRange, commit_hash: str, repo: Repo) ->
     if commit.parents:
         if len(commit.parents) == 2:
             # This is a merge commit
-            d = commit.parents[1].diff(commit, create_patch=True, unified=0)
+            result = repo.git.execute(['git', 'show', commit_hash, "--cc", "--unified=0"])
+            assert isinstance(result, str)
+            matches = HUNK_CONFLICT_PATTERN.findall(result) # TODO
+            a_names = CONFLICT_A_NAME.findall(result) # TODO
+            b_names = CONFLICT_B_NAME.findall(result)
+            ret = {}
+            for i in range(len(b_names)):
+                try:
+                    content = repo.git.execute(['git', 'show', f'{commit_hash}:{b_names[i]}'])
+                    assert isinstance(content, str)
+                except Exception as e:
+                    content = None
+                    print(f"{WARN} There is a conflict and the resolved file could not be read! Commit: {commit_hash}.")
+                    print(f"{WARN} This file will be marked as binary.")
+                    print(f"{WARN} Exception: {e}")
+                    print()
+
+                change = Change(commit.author.name)
+                actual_path = Path(repo_p(b_names[i], repo))
+                ret[actual_path] = change
+                if content is None:
+                    change.is_binary = True
+                else:
+                    print(f"{WARN} There is a conflict in file {actual_path}. Commit: {commit_hash}.")
+                    print(f"{INFO} It appears to be resolvable... however, "
+                          f"ownership will be transferred to the author of this commit.")
+                    print()
+
+                change.add_hunk(0, 0, 0, 0, content, b"", "CONFLICT")
+            return ret
         elif len(commit.parents) == 1:
             # This is a linear commit
             d = commit.parents[0].diff(commit, create_patch=True, unified=0)
@@ -449,9 +583,9 @@ def calculate_percentage(contributors: List[Contributor], result: AnalysisResult
         intermediate: DefaultDict[Contributor, int] = defaultdict(lambda: 0)
         for line_meta in val.changes[1:]:
             contributor = find_contributor(contributors, line_meta.author)
-            assert contributor is not None, f"Could not find contributor for author {line_meta.author}"
-            intermediate[contributor] = intermediate[contributor] + 1
-            author_total[contributor] = author_total[contributor] + 1
+            if contributor is not None:
+                intermediate[contributor] = intermediate[contributor] + 1
+                author_total[contributor] = author_total[contributor] + 1
             lines_total += 1
         file_lines = len(val.changes[1:])
         for contributor, lines in intermediate.items():

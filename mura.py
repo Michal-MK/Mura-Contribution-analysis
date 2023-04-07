@@ -240,8 +240,8 @@ def display_dir_tree(config: Configuration, percentage: Percentage, repo: Repo):
     print_tree(tree)
 
 
-def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]]) \
-        -> GlobalRuleWeightMultiplier:
+def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]],
+              contributors: List[Contributor]) -> GlobalRuleWeightMultiplier:
     header(f"{RULES} Rules: ")
 
     ret: GlobalRuleWeightMultiplier = defaultdict(lambda: 1.0)
@@ -260,6 +260,21 @@ def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, Li
         print("".join(rules_format), end='')
         ret[c] *= config.rule_violation_multiplier
 
+    rule_set = set(config.parsed_rules.rules)
+    for contrib in contributors:
+        if contrib not in rule_result:
+            rule_set = set()
+            break
+        rule_set = rule_set.intersection(rule_result[contrib])
+
+    if rule_set:
+        print()
+        print(f"{WARN} The following rules were NOT fulfilled by all contributors:")
+        for rule in rule_set:
+            print(f"\t{rule}")
+        print()
+        print(f"Are the rules valid for the project?")
+
     return ret
 
 
@@ -271,7 +286,7 @@ def syntax_info() -> Dict[Contributor, float]:
 
 def semantic_info(tracked_files: List[FileGroup],
                   ownership: Dict[Contributor, List[ContributionDistribution]],
-                  semantics: List[List[Tuple[SemanticWeightModel, 'LangElement']]]) \
+                  semantics: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]]) \
         -> ContributorWeight:
     header(f"{SEMANTICS} Semantics:")
 
@@ -284,24 +299,25 @@ def semantic_info(tracked_files: List[FileGroup],
         print(f"Total files: {len(group.files)}")
         total_weight = 0.0
         for j in range(len(group.files)):
-            if not group_sem or group_sem[j][0].is_empty:
+            if not group_sem or group_sem[j][1].is_empty:
                 continue
 
             owner = get_owner(ownership, group.files[j])
             print(f"File: {group.files[j].name}: Owner: {owner.name if owner is not None else 'None'}")
-            structure = group_sem[j][1]
+            structure = group_sem[j][2]
             print(f"Contents: Classes: {len(list(structure.classes))} "
                   f"Functions: {len(list(structure.functions))} "
                   f"Properties: {len(list(structure.properties))} "
                   f"Fields: {len(list(structure.fields))} "
                   f"Comments: {len(list(structure.comments))} ")
-            weight = structure.compute_weight(group_sem[j][0])
+            weight = structure.compute_weight(group_sem[j][1])
             print(f"{WEIGHT} Semantic file weight: {weight}")
             if owner is not None:
                 contributor_weight[owner] += weight
             total_weight += weight
 
         print(f"{WEIGHT} Total weight: {total_weight}")
+        print()
 
     return contributor_weight
 
@@ -404,7 +420,7 @@ def get_all_comments(element: LangElement) -> List[LangElement]:
 
 def constructs_info(tracked_files: List[FileGroup],
                     ownership: Dict[Contributor, List[ContributionDistribution]],
-                    semantic_analysis_grouped_result: List[List[Tuple[SemanticWeightModel, 'LangElement']]]):
+                    semantic_analysis_grouped_result: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]]):
     header(f"{SEMANTICS} Constructs:")
     user_constructs: Dict[Contributor, Dict[str, int]] = defaultdict(lambda: defaultdict(lambda: 0))
     for i in range(len(tracked_files)):
@@ -413,7 +429,7 @@ def constructs_info(tracked_files: List[FileGroup],
         for j in range(len(file_group.files)):
             file = file_group.files[j]
             owner = get_owner(ownership, file)
-            element = semantic_group[j][1]
+            element = semantic_group[j][2]
             for child in element.iterate():
                 if child.kind == 'root':
                     continue
@@ -422,14 +438,15 @@ def constructs_info(tracked_files: List[FileGroup],
                 user_constructs[owner][child.kind] += 1
 
     for contrib, stats in user_constructs.items():
-        print(f"{CONTRIBUTOR} {contrib.name} Owns:")
+        print(f"{CONTRIBUTOR} {contrib.name}")
+        print("  Owns:")
         for key, value in stats.items():
-            print(f" => {key} - {value}")
+            print(f"   => {key} - {value}")
 
 
 def lines_blanks_comments_info(repository: Repo,
                                ownership: Dict[Contributor, List[ContributionDistribution]],
-                               semantic_analysis_grouped_result: List[List[Tuple[SemanticWeightModel, 'LangElement']]],
+                               semantic_analysis_grouped_result: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
                                tracked_files: List[FileGroup], contributors: List[Contributor]):
     header(f"{BLANKS_COMMENTS} Blanks and comments:")
 
@@ -445,7 +462,7 @@ def lines_blanks_comments_info(repository: Repo,
         file_group = tracked_files[i]
         for j in range(len(file_group.files)):
             file = file_group.files[j]
-            element = semantic_analysis_grouped_result[i][j][1]
+            element = semantic_analysis_grouped_result[i][j][2]
             # print(f"{INFO} File: {file.name}")
             lines = element.end
             # print(f"{INFO} Lines: {lines}")
@@ -481,7 +498,7 @@ def lines_blanks_comments_info(repository: Repo,
         file_group = tracked_files[i]
         for j in range(len(file_group.files)):
             file = file_group.files[j]
-            element = semantic_analysis_grouped_result[i][j][1]
+            element = semantic_analysis_grouped_result[i][j][2]
             # print(f"{INFO} File: {file.name}")
             comments = get_all_comments(element)
             # print(f"{INFO} Comments: {len(comments)}")
@@ -544,10 +561,12 @@ def hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Co
         print(f" => {TIME} ~{hours} hours of work")
         ret[contributor] = (len(commits_by_author[contributor]), hours)
 
+    print()
+
     return ret
 
 
-def gaussian(configuration: Configuration, input_hours, hour_estimate):
+def gaussian(configuration: Configuration, input_hours: float, hour_estimate: float):
     return configuration.base_hour_match_weight * \
         math.exp(-((input_hours - hour_estimate) ** 2) / (2 * hour_estimate * 2 ** 2))
 
@@ -558,9 +577,12 @@ def gaussian_weights(configuration: Configuration, hour_estimate: float,
     header(f"{WEIGHT} Gaussian weights:")
     for contributor, commits_hours in hours.items():
         print(f"{CONTRIBUTOR} {contributor.name}:")
-        weight = gaussian(configuration, hour_estimate, commits_hours[1])
-        print(f" => {weight:.2f} {WEIGHT} Weight gained for: {commits_hours[1]} hours of work.")
-        ret[contributor] += weight
+        if commits_hours[1] != 0:
+            weight = gaussian(configuration, hour_estimate, commits_hours[1])
+            print(f" => {weight:.2f} {WEIGHT} Weight gained for: {commits_hours[1]} hours of work.")
+            ret[contributor] += weight
+        else:
+            print(f" => {INFO} Estimated 0 hours.")
 
     return ret
 
@@ -622,7 +644,7 @@ def display_results(repo: git.Repo,
                     commit_range: CommitRange,
                     syntax: AnalysisResult,
                     tracked_files: List[FileGroup],
-                    semantics: List[List[Tuple[SemanticWeightModel, 'LangElement']]],
+                    semantics: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
                     config: Configuration) -> None:
     contributors = display_contributor_info(commit_range, config)
     separator()
@@ -636,7 +658,7 @@ def display_results(repo: git.Repo,
     separator()
     display_dir_tree(config, percentage, repo)
     separator()
-    global_rule_weight_multiplier = rule_info(config, repo, ownership)
+    global_rule_weight_multiplier = rule_info(config, repo, ownership, contributors)
     separator()
     syntax_weights = syntax_info()
     separator()

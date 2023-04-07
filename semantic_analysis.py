@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Iterator
 
+from configuration import Configuration
 from lib import FileGroup
 from semantic_weight_model import SemanticWeightModel
 from uni_chars import *
@@ -105,14 +106,36 @@ class LangSemantics:
         self.lang_dir = lang_dir
         self.tool = tool_executable
 
-    def analyze(self, file: Path) -> Tuple[SemanticWeightModel, LangElement]:
-        args = [*self.tool.split(), str(self.lang_dir.parent / "declarations.json"), str(file)]
+    def analyze(self, files: List[Path]) -> List[Tuple[Path, SemanticWeightModel, LangElement]]:
+        results: List[Tuple[Path, SemanticWeightModel, LangElement]] = []
+
+        file_names = [str(file) for file in files]
+        args = [*self.tool.split(), str(self.lang_dir.parent / "declarations.json"), *file_names]
         process = subprocess.run(args, check=True, cwd=self.lang_dir, stdout=subprocess.PIPE, shell=True)
         output = process.stdout.decode("utf-8")
         lines = output.splitlines(keepends=True)
-        structure = self._parse_structure(lines)
-        model = SemanticWeightModel.parse(file)
-        return model, structure
+        file_sections: List[Tuple[Path, List[str]]] = []
+
+        file_section: Optional[Tuple[Path, List[str]]] = None
+        for line in lines:
+            if line.strip() in file_names:
+                if file_section:
+                    file_sections.append(file_section)
+                file_section = (Path(line.strip()), [])
+                continue
+            assert file_section is not None, "File section should be initialized, as the first line is a file name!"
+            file_section[1].append(line)
+
+        assert file_section is not None, "File section should be initialized, as the first line is a file name!"
+        file_sections.append(file_section)  # Append the last file section
+
+        for file_section in file_sections:
+            structure = self._parse_structure(file_section[1])
+            model = SemanticWeightModel.parse(
+                file_section[0])  # This is safe as the loop is executed only if there are files
+            results.append((file_section[0], model, structure))
+
+        return results
 
     def _parse_structure(self, lines: List[str]) -> LangElement:
         root = parent = LangElement('root', None, [])
@@ -136,34 +159,45 @@ class LangSemantics:
         return root
 
 
-def compute_semantic_weight(file: Path) -> Tuple[SemanticWeightModel, 'LangElement']:
+def compute_semantic_weight(file: Path) -> Tuple[Path, SemanticWeightModel, 'LangElement']:
     semantics = load_semantic_parser(file)
     assert semantics is not None, f"No semantic parser for {file}"
 
-    return semantics.analyze(file)
+    return semantics.analyze([file])[0]
 
 
-def compute_semantic_weight_grouped(file_group: FileGroup) -> List[Tuple[SemanticWeightModel, 'LangElement']]:
-    ret = []
-    for file in file_group.files:
-        abs_file = file.absolute()
+def compute_semantic_weight_grouped(config: Configuration, file_group: FileGroup) -> List[Tuple[Path, SemanticWeightModel, 'LangElement']]:
+    files = [file.absolute() for file in file_group.files]
 
-        if has_semantic_parser(abs_file):
-            sem_w = compute_semantic_weight(abs_file)
-            ret.append(sem_w)
+    files_by_extension: Dict[str, List[Path]] = {}
+    for file in files:
+        if file.suffix not in files_by_extension:
+            files_by_extension[file.suffix] = []
+        files_by_extension[file.suffix].append(file)
+
+    unsorted_ret: List[Tuple[Path, SemanticWeightModel, 'LangElement']] = []
+
+    for ext, files in files_by_extension.items():
+        semantics = load_semantic_parser(files[0])
+        if semantics is None or ext in config.ignored_extensions:
+            for file in files:
+                unsorted_ret.append((file, SemanticWeightModel(), LangElement('root', None, [])))
         else:
-            ret.append((SemanticWeightModel(), LangElement('root', None, [])))
-    return ret
+            unsorted_ret.extend(semantics.analyze(files))
+
+    unsorted_ret.sort(key=lambda x: file_group.files.index(x[0]))
+
+    return unsorted_ret
 
 
-def compute_semantic_weight_result(file_group: List[FileGroup], verbose=False) \
-        -> List[List[Tuple[SemanticWeightModel, 'LangElement']]]:
+def compute_semantic_weight_result(config: Configuration, file_group: List[FileGroup], verbose=False) \
+        -> List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]]:
     total_groups = len(file_group)
     counter = 1
     start = time.time()
     ret = []
     for group in file_group:
-        grouped_semantic_weight = compute_semantic_weight_grouped(group)
+        grouped_semantic_weight = compute_semantic_weight_grouped(config, group)
         ret.append(grouped_semantic_weight)
         progress = time.time()
         if verbose:

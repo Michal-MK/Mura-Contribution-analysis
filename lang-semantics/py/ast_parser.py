@@ -59,22 +59,27 @@ def get_module(path: Path):
 def main():
     args = sys.argv[1:]
     if len(args) < 2:
-        print("Usage: python3 ast_parser.py <path_to_declarations> <path_to_file>")
+        print("Usage: python3 ast_parser.py <path_to_declarations> <path_to_file>...")
         exit(1)
 
     declaration_path = Path(args[0])
-    script_path = Path(args[1])
+    script_paths = args[1:]
 
-    if not declaration_path.exists() or not script_path.exists():
-        print("Invalid path in the arguments!")
-        exit(1)
+    for script_path in script_paths:
+        script_path = Path(script_path)
+        if not script_path.exists():
+            print(f"Invalid path in the arguments: {script_path}")
+            exit(1)
 
     with open(declaration_path.absolute(), mode='r') as f:
         global ASKED_DECLARATION
         ASKED_DECLARATION = json.load(f)
 
-    module = get_module(script_path.absolute())
-    read_body(module)
+    for script_path in script_paths:
+        script_path = Path(script_path)
+        print(f"{script_path}")
+        module = get_module(script_path.absolute())
+        read_body(module)
 
 def main_debug():
     file = r"C:\Repositories\MetinSpeechToData\Python\bot_states\fight.py"

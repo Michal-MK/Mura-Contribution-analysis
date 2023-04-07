@@ -27,6 +27,13 @@ class FileGroup:
             extensions.append(file.suffix)
         return max(set(extensions), key=extensions.count)
 
+    def __str__(self):
+        return f"'{self.name}': {len(self.files)} files."
+
+    def __repr__(self):
+        return self.__str__()
+
+
 
 def first_commit(commit: Commit) -> Commit:
     while commit.parents:
@@ -152,7 +159,7 @@ def get_tracked_files(project_root: Union[Path, Repo], verbose=False) -> List[Fi
             ret.append(file_group)
 
     if verbose:
-        print(f"{INFO} Found {len(ret)} groups of related files.")
+        print(f"{SUCCESS} Found {len(ret)} groups of related files.")
 
     return ret
 
@@ -190,13 +197,18 @@ def filter_related_groups(groups: List[FileGroup]) -> List[FileGroup]:
 
     return ret
 
+def posix_repo_p(file_name: str, repo: Repo) -> str:
+    repo_dir = repo.working_dir
+    assert repo_dir is not None
+    if file_name.startswith(repo_dir):
+        return Path(os.path.relpath(file_name, repo_dir)).as_posix()
 
 def repo_p(file_name: str, repo: Repo) -> Path:
     repo_dir = repo.working_dir
     assert repo_dir is not None
     if file_name.startswith(repo_dir):
-        return Path(os.path.relpath(file_name, repo_dir))
-    return (Path(repo_dir) / file_name).resolve()
+        return Path(Path(os.path.relpath(file_name, repo_dir)).as_posix())
+    return Path((Path(repo_dir) / file_name).resolve().as_posix())
 
 
 class Contributor:
