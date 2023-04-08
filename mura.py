@@ -12,6 +12,7 @@ from git import Repo
 from matplotlib import pyplot as plt
 from matplotlib.dates import date2num, DateFormatter, drange
 from sonarqube import SonarQubeClient
+from sonarqube.utils.exceptions import AuthError
 
 from configuration import Configuration, start_sonar
 from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
@@ -171,7 +172,7 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
         commit_distribution[contributor] += 1
         split = repo.commit(commit).message.splitlines()
         message = split[0] if len(split) > 0 else ''
-        print(f'Commit: {commit} - Msg:"{message}" by {CONTRIBUTOR} {contributor.name}')
+        print(f'Commit: {commit} - Msg: "{message}" by {CONTRIBUTOR} {contributor.name}')
 
     print()
     header(f"{COMMIT} Commits per contributor:")
@@ -306,7 +307,11 @@ def start_sonar_analysis(config: Configuration, repository_path: str) -> Optiona
         sleep(2)
         try:
             response = sonar.system.ping_server()
-        except Exception:
+        except AuthError as auth:
+            print(f"{ERROR} Authentication failed. Please check your credentials. This is fatal.")
+            print(f"{INFO} The defaults for new SonarQube instances are 'admin' for both username and password.")
+            raise auth
+        except Exception as e:
             print(f"{INFO} The container is still starting... this can take a second. "
                   f"If this is the first run. This can take a while depending on your internet connection.")
             pass
