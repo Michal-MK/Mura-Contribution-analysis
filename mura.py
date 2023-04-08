@@ -1,15 +1,19 @@
 import math
 import os
 import sys
+import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Tuple, List, Dict, Optional
+from time import sleep
+from typing import Tuple, List, Dict, Optional, Any
 
+import docker
 import git
 from git import Repo
 from matplotlib import pyplot as plt
 from matplotlib.dates import date2num, DateFormatter, drange
+from sonarqube import SonarQubeClient
 
-from configuration import Configuration
+from configuration import Configuration, start_sonar
 from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
 from lib import FileGroup, Contributor, get_contributors, compute_file_ownership, find_contributor, \
     stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles, repo_p
@@ -93,7 +97,7 @@ def print_tree(tree, level=0, prefix='', ownership_cache=None):
 
 
 def plot_commits(commits: List[str], commit_range: CommitRange, contributors: List[Contributor], repo: Repo,
-                 force_x_axis_labels=False) -> None:
+                 force_x_axis_dense_labels=False) -> None:
     commit_data = defaultdict(list)
     min_date = datetime.max.replace(tzinfo=timezone.utc)
     max_date = datetime.min.replace(tzinfo=timezone.utc)
@@ -118,7 +122,7 @@ def plot_commits(commits: List[str], commit_range: CommitRange, contributors: Li
     delta = timedelta(days=1)
     dates = drange(min_date, max_date, delta)
 
-    if len(dates) <= 30 or force_x_axis_labels:
+    if len(dates) <= 30 or force_x_axis_dense_labels:
         plt.gca().xaxis.set_major_formatter(DateFormatter('%b %d'))
         plt.gca().xaxis.set_tick_params(which='both', labelbottom=True)
         plt.xticks(dates)
@@ -165,7 +169,9 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
             print(f'{INFO} Autor {author} not found in contributors. Skipping commit.')
             continue
         commit_distribution[contributor] += 1
-        print(f'Commit: {commit} by {contributor.name}')
+        split = repo.commit(commit).message.splitlines()
+        message = split[0] if len(split) > 0 else ''
+        print(f'Commit: {commit} - Msg:"{message}" by {CONTRIBUTOR} {contributor.name}')
 
     print()
     header(f"{COMMIT} Commits per contributor:")
@@ -278,9 +284,105 @@ def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, Li
     return ret
 
 
-def syntax_info() -> Dict[Contributor, float]:
-    header(f"{SYNTAX} Syntax:")
-    print(f"{INFO} TODO")
+def start_sonar_analysis(config: Configuration, repository_path: str) -> Optional[str]:
+    if not config.use_sonarqube:
+        print(f"{INFO} Syntax analysis uses SonarQube and 'config.use_sonarqube = False'. Skipping syntax analysis.")
+        return None
+
+    data_path, logs_path = start_sonar(config)
+
+    print(f"{SUCCESS} SonarQube instance is starting...")
+    if config.sonarqube_persistent:
+        print(f"{INFO} SonarQube instance is persistent. "
+              f"Data will be stored in '{data_path}' and logs in '{logs_path}'.")
+    else:
+        print(f"{INFO} SonarQube instance is not persistent. Data will be lost after the container is removed.")
+
+    url = f'http://localhost:{config.sonarqube_port}'
+    sonar = SonarQubeClient(sonarqube_url=url, username=config.sonarqube_login, password=config.sonarqube_password)
+
+    response = ''
+    while response != 'pong':
+        sleep(2)
+        try:
+            response = sonar.system.ping_server()
+        except Exception:
+            print(f"{INFO} The container is still starting... this can take a second. "
+                  f"If this is the first run. This can take a while depending on your internet connection.")
+            pass
+
+    ps = sonar.projects.search_projects()
+
+    project: Optional[Any] = None
+    project_key = ''
+    for p in ps['components']:
+        if p['name'] == repository_path:
+            print(f"{INFO} Project '{repository_path}' already exists. Skipping creation.")
+            project_key = p['key']
+            project = p
+            break
+
+    if not project:
+        project_key = uuid.uuid1().hex
+        print(f"Creating project: {repository_path}. Key: {project_key}.")
+        project = sonar.projects.create_project(project_key, name=repository_path)
+
+
+    last_analysis = project['lastAnalysisDate'] if 'lastAnalysisDate' in project else None
+    if last_analysis:
+        local_tz = datetime.now().astimezone().tzinfo
+        last_run_date = datetime.strptime(last_analysis, '%Y-%m-%dT%H:%M:%S%z').astimezone(local_tz)
+        print(f"{INFO} Last analysis date: {last_run_date}")
+    else:
+        print(f"{INFO} No analysis has been done yet.")
+
+    client = docker.from_env()
+
+    print()
+    print(f"{INFO} SonarQube 'sonar-scanner-cli' is performing analysis in the background...")
+    try:
+        env = {"SONAR_HOST_URL": f"http://localhost:{config.sonarqube_port}",
+               "SONAR_SCANNER_OPTS": f"-Dsonar.projectKey={project_key} "
+                                     f"-Dsonar.login={config.sonarqube_login} "
+                                     f"-Dsonar.password={config.sonarqube_password} "
+                                     f"-Dsonar.java.binaries=**/target"
+               }
+        client.containers.run("sonarsource/sonar-scanner-cli:4.8",
+                              environment=env,
+                              volumes={repository_path: {'bind': '/usr/src', 'mode': 'rw'}},
+                              name="mura-sonarqube-scanner-instance",
+                              remove=True,
+                              network_mode='host',
+                              detach=True)
+    except Exception as e:
+        print(f"{ERROR} Could not start SonarQube scanner. This is fatal.")
+        raise e
+
+    return project_key
+
+def syntax_info(config: Configuration, project_key: str) -> ContributorWeight:
+    header(f"{SYNTAX} Syntax + Semantics using SonarQube:")
+
+    analysis_running = True
+    client = docker.from_env()
+
+    url = f'http://localhost:{config.sonarqube_port}'
+    sonar = SonarQubeClient(sonarqube_url=url, username=config.sonarqube_login, password=config.sonarqube_password)
+
+    while analysis_running:
+        try:
+            _ = client.containers.get("mura-sonarqube-scanner-instance")
+            print(f"{INFO} Analysis is running. Waiting for it to finish...")
+            sleep(2)
+        except Exception as e:
+            analysis_running = False
+            print(f"{SUCCESS} SonarQube analysis finished.")
+            print()
+
+    issues = sonar.issues.search_issues(componentKeys=project_key)
+    for issue in issues['issues']:
+        print(issue['type'], issue['severity'], issue['message'])
+
     return defaultdict(lambda: 0.0)
 
 
@@ -374,6 +476,7 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
 
     for pr in project.pull_requests:
         author_contributor = find_contributor(contributors, pr.author)
+        print()
         header(f"{PULL_REQUESTS} Pull request: {pr.name} - by "
                f"{(author_contributor.name if author_contributor is not None else 'None')}")
         print(f"From: {pr.source_branch} to {pr.target_branch}")
@@ -446,7 +549,7 @@ def constructs_info(tracked_files: List[FileGroup],
 
 def lines_blanks_comments_info(repository: Repo,
                                ownership: Dict[Contributor, List[ContributionDistribution]],
-                               semantic_analysis_grouped_result: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
+                               semantic_analysis: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
                                tracked_files: List[FileGroup], contributors: List[Contributor]):
     header(f"{BLANKS_COMMENTS} Blanks and comments:")
 
@@ -462,7 +565,7 @@ def lines_blanks_comments_info(repository: Repo,
         file_group = tracked_files[i]
         for j in range(len(file_group.files)):
             file = file_group.files[j]
-            element = semantic_analysis_grouped_result[i][j][2]
+            element = semantic_analysis[i][j][2]
             # print(f"{INFO} File: {file.name}")
             lines = element.end
             # print(f"{INFO} Lines: {lines}")
@@ -498,7 +601,7 @@ def lines_blanks_comments_info(repository: Repo,
         file_group = tracked_files[i]
         for j in range(len(file_group.files)):
             file = file_group.files[j]
-            element = semantic_analysis_grouped_result[i][j][2]
+            element = semantic_analysis[i][j][2]
             # print(f"{INFO} File: {file.name}")
             comments = get_all_comments(element)
             # print(f"{INFO} Comments: {len(comments)}")
@@ -645,7 +748,8 @@ def display_results(repo: git.Repo,
                     syntax: AnalysisResult,
                     tracked_files: List[FileGroup],
                     semantics: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
-                    config: Configuration) -> None:
+                    config: Configuration,
+                    project_key: str) -> None:
     contributors = display_contributor_info(commit_range, config)
     separator()
     commit_distribution, insertions_deletions = commit_info(commit_range, repo, contributors)
@@ -660,7 +764,7 @@ def display_results(repo: git.Repo,
     separator()
     global_rule_weight_multiplier = rule_info(config, repo, ownership, contributors)
     separator()
-    syntax_weights = syntax_info()
+    syntax_weights = syntax_info(config, project_key)
     separator()
     semantic_weights = semantic_info(tracked_files, ownership, semantics)
     separator()

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-import gitlab
+import docker
 
 from fs_access import parse_model_content
 from rules import RuleCollection, parse_rule_file
@@ -22,12 +22,53 @@ class Configuration:
         self.github_access_token = ""
         self.default_remote_name = "origin"
         self.default_branch = "master"
+        self._use_sonarqube = False
+        self.sonarqube_persistent = True
+        self.sonarqube_port = 8085
+        self.sonarqube_login = "admin"
+        self.sonarqube_password = "admin"
         self.ignore_remote_repo = False
         self.anonymous_mode = False
         self.ignored_extensions: List[str] = []
 
         self.contributor_map: Optional[List[Tuple[str, str]]] = None
         self.parsed_rules: RuleCollection = RuleCollection([])
+
+    @property
+    def use_sonarqube(self) -> bool:
+        return self._use_sonarqube
+
+    @use_sonarqube.setter
+    def use_sonarqube(self, value: bool):
+        print(f"{INFO} Setting SonarQube usage to {value}.")
+        if not value:
+            self._use_sonarqube = value
+            return
+
+        print(f"{INFO} Checking if Docker is available...")
+        try:
+            _ = docker.from_env()
+            print(f"{SUCCESS} Docker is available!")
+            self._use_sonarqube = value
+        except Exception as e:
+            print(f"{ERROR} Docker is required to use SonarQube! And I couldn't find it!")
+            print(f"{ERROR} This is fatal!")
+            raise e
+
+    def post_validate(self):
+        if self.use_sonarqube:
+            if self.sonarqube_login == "":
+                raise Exception(f"{ERROR} SonarQube login is required!")
+            if self.sonarqube_password == "":
+                raise Exception(f"{ERROR} SonarQube password is required!")
+            if self.sonarqube_password == 'admin':
+                print(f"{WARN} SonarQube password is set to default value! "
+                      f"When you open the web interface, you will be asked to change it! "
+                      f"Do not forget to change it in the configuration file as well!")
+            print()
+            print(f"{SUCCESS} SonarQube will be available shortly at http://localhost:{self.sonarqube_port}.")
+            start_sonar(self)
+
 
     @staticmethod
     def load_from_file(config_path: Path, rules_path: Path, verbose=False) -> 'Configuration':
@@ -118,3 +159,20 @@ def open_configuration_folder():
         os.system(f"explorer {config_path}")
     else:
         os.system(f"xdg-open {config_path}")
+
+def start_sonar(config: Configuration):
+    client = docker.from_env()
+    data_path = (Path("data") / "sonarqube_data").absolute()
+    logs_path = (Path("data") / "sonarqube_logs").absolute()
+    if not any("mura-sonarqube-instance" in container.name for container in client.containers.list(all=True)):
+        volume = {
+            data_path: {'bind': '/opt/sonarqube/data', 'mode': 'rw'},
+            logs_path: {'bind': '/opt/sonarqube/logs', 'mode': 'rw'}
+        }
+
+        client.containers.run("sonarqube:10.0.0-community", ports={9000: config.sonarqube_port}, detach=True,
+                              volumes=volume if config.sonarqube_persistent else None,
+                              name="mura-sonarqube-instance")
+    else:
+        client.containers.get("mura-sonarqube-instance").start()
+    return data_path, logs_path

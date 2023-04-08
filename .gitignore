@@ -7,6 +7,10 @@ venv
 bin
 obj
 lang-semantics/java/java-ast/target
+data/sonarqube_data/*
+!data/sonarqube_data/.gitkeep
+data/sonarqube_logs/*
+!data/sonarqube_logs/.gitkeep
 
 repositories
 repositories_remote
