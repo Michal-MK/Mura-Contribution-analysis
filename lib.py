@@ -207,8 +207,8 @@ def repo_p(file_name: str, repo: Repo) -> Path:
     repo_dir = repo.working_dir
     assert repo_dir is not None
     if file_name.startswith(repo_dir):
-        return Path(Path(os.path.relpath(file_name, repo_dir)).as_posix())
-    return Path((Path(repo_dir) / file_name).resolve().as_posix())
+        return Path(os.path.relpath(file_name, repo_dir))
+    return Path((Path(repo_dir) / file_name).resolve())
 
 
 class Contributor:
@@ -307,11 +307,12 @@ def get_contributors(config: 'Configuration', commit_range: CommitRange, match_o
 
 def find_contributor(contributors: List[Contributor], author: str) -> Optional[Contributor]:
     for contributor in contributors:
-        if author == contributor.name:
+        if author == contributor.name or author == contributor.email:
             return contributor
         if author in contributor.aliases:
             return contributor
-        if author in list(map(lambda x: x.name, contributor.aliases)):
+        if author in list(map(lambda x: x.name, contributor.aliases)) or \
+                author in list(map(lambda x: x.email, contributor.aliases)):
             return contributor
     return None
 

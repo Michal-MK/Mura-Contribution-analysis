@@ -365,7 +365,7 @@ def start_sonar_analysis(config: Configuration, repository_path: str) -> Optiona
 
     return project_key
 
-def syntax_info(config: Configuration, project_key: str) -> ContributorWeight:
+def syntax_info(config: Configuration, contributors: List[Contributor], repo: Repo, project_key: str) -> ContributorWeight:
     header(f"{SYNTAX} Syntax + Semantics using SonarQube:")
 
     analysis_running = True
@@ -384,11 +384,81 @@ def syntax_info(config: Configuration, project_key: str) -> ContributorWeight:
             print(f"{SUCCESS} SonarQube analysis finished.")
             print()
 
-    issues = sonar.issues.search_issues(componentKeys=project_key)
-    for issue in issues['issues']:
-        print(f"{WARN} Severity: {issue['severity']} --> '{issue['message']}")
+    class IssueDef:
+        def __init__(self, severity: str, message: str, file: str, line: int):
+            self.severity = severity
+            self.message = message
+            self.file = file
+            self.line = line
 
-    return defaultdict(lambda: 0.0)
+    class HotspotDef:
+        def __init__(self, severity: str, message: str, file: str, line: int):
+            self.severity = severity
+            self.message = message
+            self.file = file
+            self.line = line
+
+    issues_per_contributor: Dict[Contributor, List[IssueDef]] = defaultdict(list)
+
+    issue_page = 1
+
+    all_issues = []
+    response = sonar.issues.search_issues(componentKeys=project_key, p=issue_page)
+    all_issues.extend(response['issues'])
+    while response['paging']['total'] > issue_page * response['paging']['pageSize']:
+        issue_page += 1
+        response = sonar.issues.search_issues(componentKeys=project_key, p=issue_page)
+        all_issues.extend(response['issues'])
+
+    for issue in all_issues:
+        contributor = find_contributor(contributors, issue['author'])
+        assert contributor is not None
+        issue_def = IssueDef(issue['severity'], issue['message'], issue['component'].split(':')[1], issue['line'])
+        file_path = Path(repo_p(issue_def.file, repo))
+        print(f"{WARN} Severity: {issue_def.severity} --> '{issue_def.message}")
+        print(f" -> In file: {repo_p(str(file_path), repo)}:{issue_def.line}")
+        issues_per_contributor[contributor].append(issue_def)
+
+    print()
+    ret: ContributorWeight = defaultdict(lambda: 0.0)
+
+    for contrib, issues in issues_per_contributor.items():
+        print(f"{CONTRIBUTOR} {contrib.name} has: {len(issues)} issues.")
+        for issue in issues:
+            if issue.severity == 'BLOCKER':
+                ret[contrib] += config.sonar_blocker_severity_weight
+            elif issue.severity == 'CRITICAL':
+                ret[contrib] += config.sonar_critical_severity_weight
+            elif issue.severity == 'MAJOR':
+                ret[contrib] += config.sonar_major_severity_weight
+            elif issue.severity == 'MINOR':
+                ret[contrib] += config.sonar_minor_severity_weight
+
+    print()
+    header(f"{HOTSPOT} Security concerns:")
+
+    hotspot_page = 1
+
+    all_hotspots = []
+    response = sonar.hotspots.search_hotspots(projectKey=project_key, p=hotspot_page)
+    all_hotspots.extend(response['hotspots'])
+    while response['paging']['total'] > hotspot_page * response['paging']['pageSize']:
+        hotspot_page += 1
+        response = sonar.hotspots.search_hotspots(projectKey=project_key, p=hotspot_page)
+        all_hotspots.extend(response['hotspots'])
+
+    for sec in all_hotspots:
+        contributor = find_contributor(contributors, sec['author'])
+        assert contributor is not None
+        hotspot_def = HotspotDef(sec['vulnerabilityProbability'], sec['message'],
+                                 sec['component'].split(':')[1], sec['line'])
+        file_path = Path(repo_p(hotspot_def.file, repo))
+        print(f"{WARN} Severity: {hotspot_def.severity} --> '{hotspot_def.message}")
+        print(f" -> In file: {repo_p(str(file_path), repo)}:{hotspot_def.line}")
+
+    print()
+
+    return ret
 
 
 def semantic_info(tracked_files: List[FileGroup],

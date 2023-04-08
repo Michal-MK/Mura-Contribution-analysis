@@ -11,6 +11,7 @@ DOWN_ARROW = '⬇️'
 PERCENT = '💯'
 TIME = '⏱'
 LAUNCH = '🚀'
+HOTSPOT = '🔥'
 
 CONTRIBUTOR = '👨‍💻'
 COMMIT = '⬆️'
