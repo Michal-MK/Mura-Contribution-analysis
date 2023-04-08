@@ -386,7 +386,7 @@ def syntax_info(config: Configuration, project_key: str) -> ContributorWeight:
 
     issues = sonar.issues.search_issues(componentKeys=project_key)
     for issue in issues['issues']:
-        print(issue['type'], issue['severity'], issue['message'])
+        print(f"{WARN} Severity: {issue['severity']} --> '{issue['message']}")
 
     return defaultdict(lambda: 0.0)
 

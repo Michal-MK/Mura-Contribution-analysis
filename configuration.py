@@ -17,6 +17,12 @@ class Configuration:
         self.rule_violation_multiplier = 0.9
         self.base_hour_match_weight = 200.0
         self.hour_estimate = 24.0
+        self.sonar_blocker_severity_weight = -50.0
+        self.sonar_critical_severity_weight = -10.0
+        self.sonar_major_severity_weight = -5.0
+        self.sonar_minor_severity_weight = -1.0
+        self.sonar_security_hotspot_high_weight = 0.0
+        self.sonar_security_hotspot_low_weight = 0.0
         self.remote_service = "https://gitlab.fi.muni.cz"
         self.gitlab_access_token = ""
         self.github_access_token = ""

@@ -3,3 +3,11 @@ ownership_min_threshold = 0.2
 rule_violation_multiplier = 0.9
 base_hour_match_weight = 200.0
 hour_estimate = 24.0
+
+sonar_blocker_severity_weight = -50.0
+sonar_critical_severity_weight = -10.0
+sonar_major_severity_weight = -5.0
+sonar_minor_severity_weight = -1.0
+
+sonar_security_hotspot_high_weight = 0.0
+sonar_security_hotspot_low_weight = 0.0
