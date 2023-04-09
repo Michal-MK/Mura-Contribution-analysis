@@ -24,10 +24,10 @@ class IntegrationTest(unittest.TestCase):
         tracked_files = get_tracked_files(repo)
         weights = []
         for tf in tracked_files:
-            sem_w = compute_semantic_weight_grouped(tf)
+            sem_w = compute_semantic_weight_grouped(config, tf)
             weights.append(sem_w)
 
-        display_results(repo, range, result, tracked_files, weights, config)
+        display_results(repo, range, result, tracked_files, weights, config, project_key='')
 
     @unittest.skip("Too long")
     def test_integration_two(self):
@@ -51,10 +51,10 @@ class IntegrationTest(unittest.TestCase):
                     tracked_files = get_tracked_files(repo)
                     weights = []
                     for tf in tracked_files:
-                        sem_w = compute_semantic_weight_grouped(tf)
+                        sem_w = compute_semantic_weight_grouped(config, tf)
                         weights.append(sem_w)
 
-                    display_results(repo, range, result, tracked_files, weights, config)
+                    display_results(repo, range, result, tracked_files, weights, config, project_key='')
 
 if __name__ == '__main__':
     unittest.main()

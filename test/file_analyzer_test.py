@@ -38,15 +38,15 @@ class FileAnalyzerTest(unittest.TestCase):
 
         file = list(result.values())[0]
 
-        content = file.history[1]
+        content = file.history['9b894474f7edde7e7c94e694cb588d4db0c00c29']
 
         self.assertTrue(file.line_count == 5)
-        self.assertTrue(content[0].author == 'Michal-MK')
-        self.assertTrue(content[1].author == 'Michal-MK')
-        self.assertTrue(content[2].author == 'Michal-MK')
-        self.assertTrue(content[3].author == 'Michal-MK')
-        self.assertTrue(content[4].author == 'Michal-MK')
-        self.assertTrue(len(content) == 5)
+        self.assertTrue(content.content[0].author == 'Michal-MK')
+        self.assertTrue(content.content[1].author == 'Michal-MK')
+        self.assertTrue(content.content[2].author == 'Michal-MK')
+        self.assertTrue(content.content[3].author == 'Michal-MK')
+        self.assertTrue(content.content[4].author == 'Michal-MK')
+        self.assertTrue(len(content.content) == 5)
 
         self.assertTrue(file.changes[0].author == 'Michal-MK')
         self.assertTrue(file.changes[1].author == 'Pepe')

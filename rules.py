@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from enum import Enum
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from git import Repo
 
@@ -20,8 +20,9 @@ class RuleOp(Enum):
 
 
 class Rule:
-    def __init__(self, contributor: str, directory: str, file: str, amount: str):
+    def __init__(self, contributor: str, directory: str, file: str, amount: str, constraint: Optional[str] = None):
         self.contributor = contributor
+        self.constraint = constraint
         if directory.startswith("\""):
             if not directory.endswith("\""):
                 raise Exception("Invalid directory")
@@ -146,6 +147,9 @@ def parse_rules(lines: List[str], verbose=False) -> RuleCollection:
                         index += 1
             if char == '"':
                 in_quotes = not in_quotes
+            if char == '|' and len(section_content) >= 4:
+                section_start = index
+                break
             index += 1
 
         section_content.append(line[section_start:])

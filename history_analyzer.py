@@ -3,7 +3,7 @@ import re
 from collections import deque, defaultdict
 from datetime import timedelta
 from pathlib import Path
-from typing import List, Dict, Tuple, Deque, Optional, DefaultDict, Set
+from typing import List, Dict, Tuple, Deque, Optional, DefaultDict, Set, Union
 
 from configuration import Configuration
 from lib import Percentage, first_commit, repo_p, Contributor, find_contributor, posix_repo_p
@@ -14,7 +14,6 @@ from uni_chars import *
 
 AuthorName = str
 
-OwnershipHistory = List[List['LineMetadata']]
 AnalysisResult = Dict[Path, 'Ownership']
 
 ROOT_HASH = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
@@ -27,6 +26,18 @@ HUNK_CONFLICT_PATTERN: re.Pattern[str] = re.compile(
 
 CONFLICT_A_NAME: re.Pattern = re.compile(r"--- a/(.*)\s")
 CONFLICT_B_NAME: re.Pattern = re.compile(r"\+\+\+ b/(.*)\s")
+
+
+class OwnershipHistory:
+    def __init__(self, commit: str, content: List['LineMetadata']):
+        self.commit = commit
+        self.content = content
+
+    def __str__(self):
+        return f"{self.commit} - Lines: {len(self.content)}"
+
+    def __repr__(self):
+        return self.__str__()
 
 
 class LineMetadata:
@@ -43,6 +54,7 @@ class LineMetadata:
 
     def __repr__(self):
         return self.__str__()
+
 
 class UnapplicableHunk:
     def __init__(self, ownership: 'Ownership', hunk: 'FileSection'):
@@ -154,8 +166,8 @@ class CommitRange:
         pl_path = Path(file_path)
         # Obtain the previous version of the file as a base
         content = self.checkout_file_from(commit_hash, file_path)
-        ret[pl_path] = Ownership(len(content.splitlines(keepends=True)), content)
-        ret[pl_path].apply_change(change.hunks, change.author)
+        ret[pl_path] = Ownership(pl_path, len(content.splitlines(keepends=True)), content)
+        ret[pl_path].apply_change(change.hunks, commit_hash, self.repo, change.author)
 
     def analyze(self, verbose=False) -> AnalysisResult:
         """
@@ -167,7 +179,11 @@ class CommitRange:
 
         ret: Dict[Path, Ownership] = {}
 
+        index = 1
         for commit_hash in path:
+            if verbose:
+                print(f"{INFO} Analyzing commit {commit_hash} ({index}/{len(path)})")
+                index += 1
             file_ownership = get_file_changes(self, commit_hash, self.repo)
             for file_name, change in file_ownership.items():
                 if file_name not in ret:
@@ -175,17 +191,17 @@ class CommitRange:
                         assert change.previous_name is not None
                         if change.previous_name in ret:
                             ret[file_name] = ret[change.previous_name]
+                            ret[file_name].file = file_name
                             del ret[change.previous_name]
                         else:
                             self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret)
-                        unapplicable = ret[file_name].apply_change(change.hunks, change.author)
-                        if unapplicable:
-                            print(f"{ERROR}: Unapplicable change in {commit_hash} for file {file_name}. This is fatal.")
+                        ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author)
                     elif change.hunks and change.hunks[0].mode == 'A':
-                        ret[file_name] = Ownership(change.hunks[0].change_end, change.hunks[0].content, change.author)
+                        ret[file_name] = Ownership(file_name, change.hunks[0].change_end, change.hunks[0].content,
+                                                   change.author)
                     elif not change.hunks:
                         # This is a binary file or empty file
-                        ret[file_name] = Ownership(-1, '', change.author)
+                        ret[file_name] = Ownership(file_name, -1, '', change.author)
                     elif change.hunks[0].mode == 'M':
                         # This file already existed in the repo, this can occur if the analysis does not
                         # start from the first commit
@@ -195,13 +211,13 @@ class CommitRange:
                 elif file_name in ret and change.hunks and change.hunks[0].mode == 'A' and not ret[file_name].exists:
                     # This file was deleted in a previous commit and re-added in this commit
                     ret[file_name].exists = True
-                    ret[file_name].history.append(ret[file_name].changes)
                     ret[file_name].changes = [LineMetadata(change.author, ) for _ in range(change.hunks[0].change_end)]
-                    ret[file_name]._line_count = change.hunks[0].change_end  # Lines are indexes starting with 1
+                    ret[file_name]._line_count = change.hunks[0].change_end
+                    ret[file_name].history[commit_hash] = OwnershipHistory(commit_hash, ret[file_name].changes)
                     continue
 
                 elif file_name in ret and change.hunks and change.hunks[0].mode == 'D':
-                    ret[file_name].delete()
+                    ret[file_name].delete(commit_hash)
                     continue
 
                 if len(change.hunks) == 1 and change.hunks[0].mode == 'D':
@@ -210,29 +226,31 @@ class CommitRange:
                 if len(change.hunks) == 1 and change.hunks[0].mode == 'A':
                     # This file was added in a previous commit as well as in this commit
                     # Likely a conflict down the line
-                    print(f"{WARN} File {file_name} was added in a previous commit as well as in this commit.")
-                    h = change.hunks[0]
-                    print(f"{WARN} Incoming length: {h.length_difference}, current "
-                          f"length: {len(ret[file_name].changes)}")
-                    print(f"{INFO} Replacing... (This may lead to a loss of information)")
-                    print(f"{INFO} One cause for this is Windows NTFS being case insensitive.")
-                    ret[file_name] = Ownership(change.hunks[0].change_end, change.hunks[0].content, change.author)
-                    print()
+                    if verbose:
+                        print(f"{WARN} File {file_name} was added in a previous commit as well as in this commit.")
+                        print(f"{INFO} Replacing... (This may lead to a loss of information)")
+                        print(f"{INFO} One cause for this is Windows NTFS being case insensitive. "
+                              f"Or a merge conflict will happen.")
+                        ret[file_name] = Ownership(file_name, change.hunks[0].change_end, change.hunks[0].content,
+                                                   change.author)
+                        print()
                     continue
 
-                unapplicable = ret[file_name].apply_change(change.hunks, change.author)
-                if unapplicable:
-                    for u in unapplicable:
-                        print(f"{WARN}: Unapplicable change in {commit_hash} for file {file_name}.")
-                        print(f"{WARN}: There is no information in the history of this file to "
-                              f"effectively resolve this conflict.")
-                        print(f"{INFO}: Restoring the file from the current commit. All authorship till now is lost.")
-                        print()
-                        ret[file_name]._apply_conflict_resolution(change.author, u.hunk)
+                ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author)
 
 
         if verbose:
-            print(f"{INFO} Analyzed {len(ret)} files")
+            print()
+            print(f"{SUCCESS} Analyzed {len(ret)} files.")
+
+        lstree = self.repo.git.execute(['git', 'ls-tree', '-r', self.head, '--name-only'])
+        assert isinstance(lstree, str)
+
+        files = lstree.splitlines()
+        print(f"{INFO} Found {len(files)} files in the repository. {len(ret)} files were analyzed.")
+        if len(ret) > len(files):
+            print(f"{INFO} More were analyzed due to renames and deletes. "
+                  f"If a file was marked as renamed, the ownership was transferred to the new file correctly.")
 
         return ret
 
@@ -312,8 +330,9 @@ class CommitRange:
                 commit = repository.commit(hexsha)
                 author = commit.author.name
                 assert isinstance(author, str)
-                print(hexsha + f" {RIGHT_ARROW} {COMMIT} Commit: {commit.message.splitlines()[0]} "
-                               f"({find_contributor(contributors, author).name})")
+                contrib = find_contributor(contributors, author)
+                assert contrib is not None
+                print(hexsha + f" {RIGHT_ARROW} {COMMIT} Commit: {commit.message.splitlines()[0]} ({contrib.name})")
         if not unmerged_content:
             print(f'{SUCCESS} No unmerged branches found! Everything is in the "{config.default_branch}" branch!')
 
@@ -353,8 +372,9 @@ class Change:
 
 
 class Ownership:
-    def __init__(self, init_line_count: int, initial_content: str, author: str = '') -> None:
-        self.history: OwnershipHistory = []
+    def __init__(self, file: Path, init_line_count: int, initial_content: str, author: str = '') -> None:
+        self.file = file
+        self.history: Dict[str, OwnershipHistory] = {}
         split = initial_content.splitlines(keepends=True)
         if split:
             has_newline = split[-1].endswith('\n')
@@ -376,24 +396,20 @@ class Ownership:
     def content(self):
         return ''.join(map(lambda x: x.content, self.changes))
 
-    def delete(self):
-        self.history.append(copy.deepcopy(self.changes))
+    def delete(self, commit_hash: str):
+        self.history[commit_hash] = OwnershipHistory(commit_hash, copy.deepcopy(self.changes))
         self.changes = []
         self._line_count = 0
         self.exists = False
 
-    def apply_change(self, hunks: List[FileSection], author: AuthorName) -> List[UnapplicableHunk]:
-        self.history.append(copy.deepcopy(self.changes))
-
-        assert not any(map(lambda x: x.mode in ['A', 'D'],
-                           hunks)), "This function can only be used to add changes to existing files."
-
-        unapplicable_hunks: List[UnapplicableHunk] = []
+    def apply_change(self, hunks: List[FileSection], commit_hash: str, repo: Repo, author: AuthorName) -> None:
+        assert not any(map(lambda x: x.mode in ['A', 'D'], hunks)), \
+            "This function can only be used to add changes to existing files."
 
         if self.line_count == -1:
             # This is a binary file
             self.changes[0] = LineMetadata(author, '\1')
-            return unapplicable_hunks
+            return
 
         new_file_index_offset = 0
 
@@ -419,10 +435,17 @@ class Ownership:
                 for _ in range(hunk.prev_len):
                     try:
                         self.changes.pop(hunk.change_start)
-                    except IndexError:
-                        print(f"IndexError: {hunk.prev_start + new_file_index_offset} {len(self.changes)}")
-                        unapplicable_hunks.append(UnapplicableHunk(self, hunk))
-                        return unapplicable_hunks
+                    except IndexError as e:
+                        blame_res = repo.blame(commit_hash, posix_repo_p(str(self.file), repo))
+                        assert blame_res is not None
+                        self.changes = []
+                        for section in blame_res:
+                            commit = section[0]
+                            assert isinstance(commit, Commit)
+                            lines = section[1]
+                            assert isinstance(lines, list)
+                            self.changes.extend([LineMetadata(commit.author.name, line) for line in lines])
+                            self.line_count = len(self.changes)
 
                 new_file_index_offset -= hunk.prev_len
                 self.line_count -= hunk.prev_len
@@ -435,17 +458,23 @@ class Ownership:
                 for i in range(hunk.prev_len):
                     try:
                         self.changes.pop(file_start)
-                    except IndexError:
-                        print(f"IndexError: {file_start} {len(self.changes)}")
-                        unapplicable_hunks.append(UnapplicableHunk(self, hunk))
-                        return unapplicable_hunks
-
+                    except IndexError as e:
+                        blame_res = repo.blame(commit_hash, posix_repo_p(str(self.file), repo))
+                        assert blame_res is not None
+                        self.changes = []
+                        for section in blame_res:
+                            commit = section[0]
+                            assert isinstance(commit, Commit)
+                            lines = section[1]
+                            assert isinstance(lines, list)
+                            self.changes.extend([LineMetadata(commit.author.name, line) for line in lines])
+                            self.line_count = len(self.changes)
                 for i in range(hunk.new_len):
                     self.changes.insert(file_start, new_meta[hunk.new_len - 1 - i])
                 new_file_index_offset += hunk.length_difference
                 self.line_count += hunk.length_difference
 
-        return unapplicable_hunks
+        self.history[commit_hash] = OwnershipHistory(commit_hash, copy.deepcopy(self.changes))
 
     def _apply_conflict_resolution(self, author: str, hunk: FileSection):
         split = hunk.content.splitlines(keepends=True)
@@ -488,8 +517,8 @@ def get_file_changes(commit_range: CommitRange, commit_hash: str, repo: Repo) ->
             # This is a merge commit
             result = repo.git.execute(['git', 'show', commit_hash, "--cc", "--unified=0"])
             assert isinstance(result, str)
-            matches = HUNK_CONFLICT_PATTERN.findall(result) # TODO
-            a_names = CONFLICT_A_NAME.findall(result) # TODO
+            matches = HUNK_CONFLICT_PATTERN.findall(result)  # TODO
+            a_names = CONFLICT_A_NAME.findall(result)  # TODO
             b_names = CONFLICT_B_NAME.findall(result)
             ret = {}
             for i in range(len(b_names)):

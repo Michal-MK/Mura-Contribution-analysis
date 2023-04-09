@@ -368,6 +368,10 @@ def start_sonar_analysis(config: Configuration, repository_path: str) -> Optiona
 def syntax_info(config: Configuration, contributors: List[Contributor], repo: Repo, project_key: str) -> ContributorWeight:
     header(f"{SYNTAX} Syntax + Semantics using SonarQube:")
 
+    if not config.use_sonarqube:
+        print(f"{INFO} Syntax analysis uses SonarQube and 'config.use_sonarqube = False'. Skipping syntax analysis.")
+        return {}
+
     analysis_running = True
     client = docker.from_env()
 
@@ -625,13 +629,16 @@ def constructs_info(tracked_files: List[FileGroup],
 def lines_blanks_comments_info(repository: Repo,
                                ownership: Dict[Contributor, List[ContributionDistribution]],
                                semantic_analysis: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
-                               tracked_files: List[FileGroup], contributors: List[Contributor]):
+                               tracked_files: List[FileGroup],
+                               n_extreme_files: int = 5):
     header(f"{BLANKS_COMMENTS} Blanks and comments:")
+
+    assert n_extreme_files >= 0, 'n_extreme_files must be a non-negative number!'
 
     total_lines = 0
     tracked_file_count = 0
-    largest_files = [(0, Path()) for _ in range(5)]
-    smallest_files = [(sys.maxsize, Path()) for _ in range(5)]
+    largest_files = [(0, Path()) for _ in range(n_extreme_files)]
+    smallest_files = [(sys.maxsize, Path()) for _ in range(n_extreme_files)]
 
     smallest_index = 0
     largest_index = 0
@@ -645,7 +652,7 @@ def lines_blanks_comments_info(repository: Repo,
             lines = element.end
             # print(f"{INFO} Lines: {lines}")
             total_lines += lines
-            if element.children:
+            if element.children and n_extreme_files > 0:
                 if lines < smallest_files[largest_index][0]:
                     smallest_files[largest_index] = (lines, file)
                     largest_index = smallest_files.index(max(smallest_files, key=lambda x: x[0]))
@@ -656,16 +663,17 @@ def lines_blanks_comments_info(repository: Repo,
 
     print(f"{INFO} Total lines: {total_lines} across {tracked_file_count} files.")
 
-    print(f"{INFO} Largest files:")
-    for x in sorted(largest_files, key=lambda x: x[0], reverse=True):
-        owner = get_owner(ownership, x[1])
-        name = owner.name if owner is not None else "None"
-        print(f" => {repo_p(str(x[1]), repository)} ({x[0]}) by {CONTRIBUTOR}: {name}")
-    print(f"{INFO} Smallest files:")
-    for x in sorted(smallest_files, key=lambda x: x[0]):
-        owner = get_owner(ownership, x[1])
-        name = owner.name if owner is not None else "None"
-        print(f" => {repo_p(str(x[1]), repository)} ({x[0]}) by {CONTRIBUTOR}: {name}")
+    if n_extreme_files > 0:
+        print(f"{INFO} Largest files:")
+        for x in sorted(largest_files, key=lambda x: x[0], reverse=True):
+            owner = get_owner(ownership, x[1])
+            name = owner.name if owner is not None else "None"
+            print(f" => {repo_p(str(x[1]), repository)} ({x[0]}) by {CONTRIBUTOR}: {name}")
+        print(f"{INFO} Smallest files:")
+        for x in sorted(smallest_files, key=lambda x: x[0]):
+            owner = get_owner(ownership, x[1])
+            name = owner.name if owner is not None else "None"
+            print(f" => {repo_p(str(x[1]), repository)} ({x[0]}) by {CONTRIBUTOR}: {name}")
 
     print(f"{INFO} Blanks and comments in final version...")
 
@@ -839,7 +847,7 @@ def display_results(repo: git.Repo,
     separator()
     global_rule_weight_multiplier = rule_info(config, repo, ownership, contributors)
     separator()
-    syntax_weights = syntax_info(config, project_key)
+    syntax_weights = syntax_info(config, contributors, repo, project_key)
     separator()
     semantic_weights = semantic_info(tracked_files, ownership, semantics)
     separator()

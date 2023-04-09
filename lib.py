@@ -202,6 +202,7 @@ def posix_repo_p(file_name: str, repo: Repo) -> str:
     assert repo_dir is not None
     if file_name.startswith(repo_dir):
         return Path(os.path.relpath(file_name, repo_dir)).as_posix()
+    return (Path(repo_dir) / file_name).resolve().as_posix()
 
 def repo_p(file_name: str, repo: Repo) -> Path:
     repo_dir = repo.working_dir
