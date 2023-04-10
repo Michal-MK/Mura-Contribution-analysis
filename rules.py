@@ -51,7 +51,7 @@ class Rule:
 
     @property
     def all_contributors(self):
-        return self.contributor_name == "*"
+        return self.contributor_name == "*" or self.contributor_name == "r*"
 
     @abc.abstractmethod
     def matches(self, **kwargs) -> bool:
@@ -134,7 +134,7 @@ class RemoteRule(Rule):
 
     def __str__(self):
         ret = super().__str__()
-        obj = "issue" if self.remote_object == 'issue/s' else "pull request/s"
+        obj = "issue/s" if self.remote_object == 'issue' else "pull request/s"
         ret += f"authored {obj}."
         return ret
 
