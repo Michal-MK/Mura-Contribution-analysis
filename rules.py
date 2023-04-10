@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import re
 from enum import Enum
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import List, Dict, Optional
 from git import Repo
 
 from lib import ContributionDistribution, Contributor, repo_p
+from repository_hooks import RemoteRepository
 from uni_chars import *
 
 
@@ -20,19 +22,9 @@ class RuleOp(Enum):
 
 
 class Rule:
-    def __init__(self, contributor: str, directory: str, file: str, amount: str, constraint: Optional[str] = None):
-        self.contributor = contributor
-        self.constraint = constraint
-        if directory.startswith("\""):
-            if not directory.endswith("\""):
-                raise Exception("Invalid directory")
-            self.directory = directory[1:-1]
-            if self.directory.endswith("/"):
-                self.directory = self.directory[:-1]
-        if file.startswith("\""):
-            if not file.endswith("\""):
-                raise Exception("Invalid file")
-            self.file = re.compile(file[1:-1])
+    def __init__(self, contributor: str, amount: str) -> None:
+        self.contributor_name = contributor
+        self.contributor_instance: Optional[Contributor] = None
         try:
             self.amount = int(amount)
             self.op_call = lambda x, y: x == y
@@ -59,23 +51,18 @@ class Rule:
 
     @property
     def all_contributors(self):
-        return self.contributor == "*"
+        return self.contributor_name == "*"
 
-    def matches(self, repo: Repo, ownership: List[ContributionDistribution]) -> bool:
-        for file, percentage in ownership:
-            repo_path = repo_p(str(file), repo)
-
-            if repo_path.parent.match(self.directory) and self.file.match(repo_path.name):
-                if self.op_call(percentage, self.amount):
-                    return True
-        return False
+    @abc.abstractmethod
+    def matches(self, **kwargs) -> bool:
+        pass
 
     def __str__(self):
         ret = ""
         if self.all_contributors:
             ret += "All contributors "
         else:
-            ret += f"{self.contributor} "
+            ret += f"{self.contributor_name} "
         ret += f"must have "
         if self.op == RuleOp.EQUALS:
             ret += f"exactly {self.amount} "
@@ -87,7 +74,68 @@ class Rule:
             ret += f"more than {self.amount} "
         elif self.op == RuleOp.LESS_THAN:
             ret += f"less than {self.amount} "
+        return ret
+
+
+class FileRule(Rule):
+    def __init__(self, contributor: str, directory: str, file: str, amount: str, constraint: Optional[str] = None):
+        super().__init__(contributor, amount)
+        self.constraint = constraint
+        if directory.startswith("\""):
+            if not directory.endswith("\""):
+                raise Exception(f"Invalid directory: {directory}")
+            self.directory = directory[1:-1]
+            if self.directory.endswith("/"):
+                self.directory = self.directory[:-1]
+        else:
+            raise Exception(f"Directory must be enclosed in double-quotes!")
+        if file.startswith("\""):
+            if not file.endswith("\""):
+                raise Exception(f"Invalid file: {file}")
+            self.file = re.compile(file[1:-1])
+        else:
+            raise Exception(f"File must be enclosed in double-quotes!")
+
+    def matches(self, **kwargs) -> bool:
+        repo: Repo = kwargs['repo']
+        ownership: List[ContributionDistribution] = kwargs['ownership']
+        for file, percentage in ownership:
+            repo_path = repo_p(str(file), repo)
+
+            if repo_path.parent.match(self.directory) and self.file.match(repo_path.name):
+                if self.op_call(percentage, self.amount):
+                    return True
+        return False
+
+    def __str__(self):
+        ret = super().__str__()
         ret += f"file/s matching: `{self.file.pattern}` in a directory matching: `{self.directory}`"
+        return ret
+
+
+class RemoteRule(Rule):
+    def __init__(self, contributor: str, remote_object: str, amount: str):
+        super().__init__(contributor, amount)
+        self.remote_object = remote_object
+        if self.remote_object not in ['issue', 'pr']:
+            raise Exception(f"Invalid remote object: {self.remote_object}, expected 'issue' or 'pr'")
+
+    def matches(self, **kwargs) -> bool:
+        project: RemoteRepository = kwargs['project']
+        if self.remote_object == 'issue':
+            issues = [x for x in project.issues if x.author == self.contributor_name]
+            if self.op_call(len(issues), self.amount):
+                return True
+        else:
+            prs = project.pull_requests
+            if self.op_call(len(prs), self.amount):
+                return True
+        return False
+
+    def __str__(self):
+        ret = super().__str__()
+        obj = "issue" if self.remote_object == 'issue/s' else "pull request/s"
+        ret += f"authored {obj}."
         return ret
 
 
@@ -95,7 +143,8 @@ class RuleCollection:
     def __init__(self, rules: List[Rule]):
         self.rules = rules
 
-    def matches(self, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]]) -> Dict[Contributor, List[Rule]]:
+    def matches_files(self, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]]) -> Dict[
+        Contributor, List[Rule]]:
         """
         Matches the rule_data against the ownership, returning a dictionary of contributors and the rule_data that they violate.
 
@@ -104,12 +153,38 @@ class RuleCollection:
         """
         ret: Dict[Contributor, List[Rule]] = {}
         for actor in ownership.keys():
-            for rule in self.rules:
-                if rule.all_contributors or rule.contributor == actor:
-                    if not rule.matches(repo, ownership[actor]):
+            for rule in [r for r in self.rules if isinstance(r, FileRule)]:
+                if rule.all_contributors:
+                    if not rule.matches(repo=repo, ownership=ownership[actor]):
                         if actor not in ret:
                             ret[actor] = []
                         ret[actor].append(rule)
+                else:
+                    if actor == rule.contributor_name:
+                        rule.contributor_instance = actor
+                        if not rule.matches(repo=repo, ownership=ownership[actor]):
+                            if actor not in ret:
+                                ret[actor] = []
+                            ret[actor].append(rule)
+        return ret
+
+    def matches_remote(self, contributors: List[Contributor], project: RemoteRepository) -> Dict[Contributor, List[Rule]]:
+        ret: Dict[Contributor, List[Rule]] = {}
+        for rule in [r for r in self.rules if isinstance(r, RemoteRule)]:
+            if rule.all_contributors:
+                for actor in contributors:
+                    if not rule.matches(project=project):
+                        if actor not in ret:
+                            ret[actor] = []
+                        ret[actor].append(rule)
+            else:
+                actor = next((c for c in contributors if c == rule.contributor_name), None)
+                rule.contributor_instance = actor
+                assert actor is not None
+                if not rule.matches(project=project):
+                    if actor not in ret:
+                        ret[actor] = []
+                    ret[actor].append(rule)
         return ret
 
 
@@ -153,7 +228,12 @@ def parse_rules(lines: List[str], verbose=False) -> RuleCollection:
             index += 1
 
         section_content.append(line[section_start:])
-        rule = Rule(*section_content)
+
+        rule: Rule
+        if section_content[0][0] == 'r':
+            rule = RemoteRule(*section_content)
+        else:
+            rule = FileRule(*section_content)
 
         if verbose:
             print(f" - Rule: {rule}")

@@ -22,7 +22,7 @@ class RuleTests(unittest.TestCase):
             ContributionDistribution(Path("./TurtleGraphics/Models/LanguageButtonModel.cs"), 1),
         ]
 
-        result = rules.matches(self.repo, input)
+        result = rules.matches_files(self.repo, input)
         self.assertFalse(result)
     def test_rule_one_violation(self):
         rules = parse_rules([r'* "*/Models/" "[a-zA-Z_][a-zA-Z0-9_]*Model[a-zA-Z_][a-zA-Z0-9_]*\.cs" >=1'])
@@ -33,7 +33,7 @@ class RuleTests(unittest.TestCase):
             ContributionDistribution(Path("./TurtleGraphics/Models/LanguageButton.cs"), 1),
         ]
 
-        result = rules.matches(self.repo, input)
+        result = rules.matches_files(self.repo, input)
         self.assertTrue(result)
         contributor = Contributor("Michal-MK", "michalhz159@gmail.com")
         self.assertTrue(list(result.keys()) == [contributor])

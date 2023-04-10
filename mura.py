@@ -19,7 +19,7 @@ from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
 from lib import FileGroup, Contributor, get_contributors, compute_file_ownership, find_contributor, \
     stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles, repo_p
 from remote_repository_weight_model import RemoteRepositoryWeightModel
-from repository_hooks import parse_project, Issue
+from repository_hooks import parse_project, Issue, RemoteRepository
 from semantic_analysis import LangElement
 from semantic_weight_model import SemanticWeightModel
 
@@ -259,7 +259,7 @@ def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, Li
     print()
     header(f"{VIOLATED_RULES} Violated Rules: ")
 
-    rule_result = config.parsed_rules.matches(repo, ownership)
+    rule_result = config.parsed_rules.matches_files(repo, ownership)
 
     for c, rules in rule_result.items():
         rules_format = [('\t' + str(rule) + os.linesep) for rule in rules]
@@ -504,12 +504,12 @@ def semantic_info(tracked_files: List[FileGroup],
 
 
 def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, contributors: List[Contributor]) \
-        -> ContributorWeight:
+        -> Tuple[RemoteRepository, ContributorWeight]:
     header(f"{REMOTE_REPOSITORY} Remote repository management:")
 
     if config.ignore_remote_repo:
         print(f"{INFO} Skipping as 'config.ignore_remote_repo = True'")
-        return {}
+        return (RemoteRepository("", ""), {})
 
     start_date = commit_range.hist_commit.committed_datetime
     end_date = commit_range.head_commit.committed_datetime
@@ -577,7 +577,7 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
 
         print(f"{WEIGHT} Weight {pr_weight} - Beneficiaries: {', '.join(map(lambda x: x.name, beneficiaries))}")
 
-    return contributor_weight
+    return project, contributor_weight
 
 
 def file_statistics_info(commit_range: CommitRange, contributors: List[Contributor]) \
@@ -851,7 +851,7 @@ def display_results(repo: git.Repo,
     separator()
     semantic_weights = semantic_info(tracked_files, ownership, semantics)
     separator()
-    repo_management_weights = remote_info(commit_range, repo, config, contributors)
+    project, repo_management_weights = remote_info(commit_range, repo, config, contributors)
     separator()
     hours = gaussian_weights(config, config.hour_estimate, hour_estimates(contributors, repo))
     separator()
