@@ -22,7 +22,8 @@ class RemoteRepositoryWeightModel:
 
     def evaluate(self, element: Union[Issue, PR], start_date: datetime, end_date: datetime, verbose=True) -> float:
         if isinstance(element, Issue):
-            if element.created_at > end_date or element.closed_at is None or element.closed_at < start_date:
+            if element.created_at > end_date or element.closed_at is None or element.closed_at < start_date \
+                    or element.closed_at > end_date:
                 if verbose:
                     print(f"{INFO} Issue was not closed during the period or did not exist at all.")
                 return 0.0
@@ -30,7 +31,8 @@ class RemoteRepositoryWeightModel:
             # TODO
             return weight
         elif isinstance(element, PR):
-            if element.created_at > end_date or element.merged_at is None or element.merged_at < start_date:
+            if element.created_at > end_date or element.merged_at is None or element.merged_at < start_date \
+                    or element.merged_at > end_date:
                 if verbose:
                     print(f"{INFO} PR was not merged during the period or did not exist at all.")
                 return 0.0

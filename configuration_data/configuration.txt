@@ -1,6 +1,8 @@
 full_ownership_min_threshold = 0.8
 ownership_min_threshold = 0.2
-rule_violation_multiplier = 0.9
+file_rule_violation_multiplier = 0.9
+issue_rule_violation_multiplier = 0.98
+pr_rule_violation_multiplier = 0.9
 base_hour_match_weight = 200.0
 hour_estimate = 24.0
 

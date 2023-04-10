@@ -122,12 +122,13 @@ class RemoteRule(Rule):
 
     def matches(self, **kwargs) -> bool:
         project: RemoteRepository = kwargs['project']
+        owner: Contributor = kwargs['owner']
         if self.remote_object == 'issue':
-            issues = [x for x in project.issues if x.author == self.contributor_name]
+            issues = [x for x in project.issues if owner == x.author]
             if self.op_call(len(issues), self.amount):
                 return True
         else:
-            prs = project.pull_requests
+            prs = [x for x in project.pull_requests if owner == x.author]
             if self.op_call(len(prs), self.amount):
                 return True
         return False
@@ -144,14 +145,14 @@ class RuleCollection:
         self.rules = rules
 
     def matches_files(self, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]]) -> Dict[
-        Contributor, List[Rule]]:
+        Contributor, List[FileRule]]:
         """
         Matches the rule_data against the ownership, returning a dictionary of contributors and the rule_data that they violate.
 
         :param ownership: The ownership to match against
         :return: A dictionary of contributors and the rule_data that they violate
         """
-        ret: Dict[Contributor, List[Rule]] = {}
+        ret: Dict[Contributor, List[FileRule]] = {}
         for actor in ownership.keys():
             for rule in [r for r in self.rules if isinstance(r, FileRule)]:
                 if rule.all_contributors:
@@ -168,12 +169,12 @@ class RuleCollection:
                             ret[actor].append(rule)
         return ret
 
-    def matches_remote(self, contributors: List[Contributor], project: RemoteRepository) -> Dict[Contributor, List[Rule]]:
-        ret: Dict[Contributor, List[Rule]] = {}
+    def matches_remote(self, contributors: List[Contributor], project: RemoteRepository) -> Dict[Contributor, List[RemoteRule]]:
+        ret: Dict[Contributor, List[RemoteRule]] = {}
         for rule in [r for r in self.rules if isinstance(r, RemoteRule)]:
             if rule.all_contributors:
                 for actor in contributors:
-                    if not rule.matches(project=project):
+                    if not rule.matches(project=project, owner=actor):
                         if actor not in ret:
                             ret[actor] = []
                         ret[actor].append(rule)
@@ -181,7 +182,7 @@ class RuleCollection:
                 actor = next((c for c in contributors if c == rule.contributor_name), None)
                 rule.contributor_instance = actor
                 assert actor is not None
-                if not rule.matches(project=project):
+                if not rule.matches(project=project, owner=actor):
                     if actor not in ret:
                         ret[actor] = []
                     ret[actor].append(rule)

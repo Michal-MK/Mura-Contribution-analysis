@@ -19,7 +19,7 @@ from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
 from lib import FileGroup, Contributor, get_contributors, compute_file_ownership, find_contributor, \
     stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles, repo_p
 from remote_repository_weight_model import RemoteRepositoryWeightModel
-from repository_hooks import parse_project, Issue, RemoteRepository
+from repository_hooks import parse_project, Issue, RemoteRepository, GithubRepository
 from semantic_analysis import LangElement
 from semantic_weight_model import SemanticWeightModel
 
@@ -248,7 +248,7 @@ def display_dir_tree(config: Configuration, percentage: Percentage, repo: Repo):
 
 
 def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]],
-              contributors: List[Contributor]) -> GlobalRuleWeightMultiplier:
+              contributors: List[Contributor], remote_project: RemoteRepository) -> GlobalRuleWeightMultiplier:
     header(f"{RULES} Rules: ")
 
     ret: GlobalRuleWeightMultiplier = defaultdict(lambda: 1.0)
@@ -257,15 +257,37 @@ def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, Li
         print(rule)
 
     print()
+    print(f"{WEIGHT} Weight Multipliers:")
+    print(f"\tFile weight {config.file_rule_violation_multiplier}")
+    print(f"\tIssue weight {config.issue_rule_violation_multiplier}")
+    print(f"\tPull request weight {config.pr_rule_violation_multiplier}")
+
+    print()
     header(f"{VIOLATED_RULES} Violated Rules: ")
 
     rule_result = config.parsed_rules.matches_files(repo, ownership)
+    rule_result_remote = config.parsed_rules.matches_remote(contributors, remote_project)
 
-    for c, rules in rule_result.items():
-        rules_format = [('\t' + str(rule) + os.linesep) for rule in rules]
+    if not rule_result and not rule_result_remote:
+        print(f"{SUCCESS} No rules were violated.")
+        return ret
+
+    for c, file_rules in rule_result.items():
+        rules_format = [('\t' + str(rule) + os.linesep) for rule in file_rules]
         print(f"{ERROR} Contributor {c} did not fulfill the following requirements:")
         print("".join(rules_format), end='')
-        ret[c] *= config.rule_violation_multiplier
+        for _ in file_rules:
+            ret[c] *= config.file_rule_violation_multiplier
+
+    for c, remote_rules in rule_result_remote.items():
+        rules_format = [('\t' + str(rule) + os.linesep) for rule in remote_rules]
+        print(f"{ERROR} Contributor {c} did not fulfill the following requirements:")
+        print("".join(rules_format), end='')
+        for r_rule in remote_rules:
+            if r_rule.remote_object == 'issue':
+                ret[c] *= config.issue_rule_violation_multiplier
+            elif r_rule.remote_object == 'pr':
+                ret[c] *= config.pr_rule_violation_multiplier
 
     rule_set = set(config.parsed_rules.rules)
     for contrib in contributors:
@@ -332,7 +354,6 @@ def start_sonar_analysis(config: Configuration, repository_path: str) -> Optiona
         print(f"Creating project: {repository_path}. Key: {project_key}.")
         project = sonar.projects.create_project(project_key, name=repository_path)
 
-
     last_analysis = project['lastAnalysisDate'] if 'lastAnalysisDate' in project else None
     if last_analysis:
         local_tz = datetime.now().astimezone().tzinfo
@@ -365,7 +386,9 @@ def start_sonar_analysis(config: Configuration, repository_path: str) -> Optiona
 
     return project_key
 
-def syntax_info(config: Configuration, contributors: List[Contributor], repo: Repo, project_key: str) -> ContributorWeight:
+def syntax_info(config: Configuration, contributors: List[Contributor], repo: Repo,
+                file_ownership: Dict[Contributor, List[ContributionDistribution]],
+                project_key: str) -> ContributorWeight:
     header(f"{SYNTAX} Syntax + Semantics using SonarQube:")
 
     if not config.use_sonarqube:
@@ -414,14 +437,23 @@ def syntax_info(config: Configuration, contributors: List[Contributor], repo: Re
         response = sonar.issues.search_issues(componentKeys=project_key, p=issue_page)
         all_issues.extend(response['issues'])
 
+    if len(all_issues) > 0:
+        header(f"{HOTSPOT} Reported Issues:")
+
     for issue in all_issues:
         contributor = find_contributor(contributors, issue['author'])
-        assert contributor is not None
         issue_def = IssueDef(issue['severity'], issue['message'], issue['component'].split(':')[1], issue['line'])
         file_path = Path(repo_p(issue_def.file, repo))
         print(f"{WARN} Severity: {issue_def.severity} --> '{issue_def.message}")
         print(f" -> In file: {repo_p(str(file_path), repo)}:{issue_def.line}")
-        issues_per_contributor[contributor].append(issue_def)
+        if not contributor:
+            contributor = get_owner(file_ownership, file_path)
+        if not contributor:
+            print(f"{WARN} Could not determine who owns this issue. Distributing to all contributors.")
+            for c in contributors:
+                issues_per_contributor[c].append(issue_def)
+        else:
+            issues_per_contributor[contributor].append(issue_def)
 
     print()
     ret: ContributorWeight = defaultdict(lambda: 0.0)
@@ -439,7 +471,6 @@ def syntax_info(config: Configuration, contributors: List[Contributor], repo: Re
                 ret[contrib] += config.sonar_minor_severity_weight
 
     print()
-    header(f"{HOTSPOT} Security concerns:")
 
     hotspot_page = 1
 
@@ -451,16 +482,22 @@ def syntax_info(config: Configuration, contributors: List[Contributor], repo: Re
         response = sonar.hotspots.search_hotspots(projectKey=project_key, p=hotspot_page)
         all_hotspots.extend(response['hotspots'])
 
+    if len(all_hotspots) > 0:
+        header(f"{HOTSPOT} Security concerns:")
+
     for sec in all_hotspots:
         contributor = find_contributor(contributors, sec['author'])
-        assert contributor is not None
         hotspot_def = HotspotDef(sec['vulnerabilityProbability'], sec['message'],
                                  sec['component'].split(':')[1], sec['line'])
         file_path = Path(repo_p(hotspot_def.file, repo))
         print(f"{WARN} Severity: {hotspot_def.severity} --> '{hotspot_def.message}")
         print(f" -> In file: {repo_p(str(file_path), repo)}:{hotspot_def.line}")
+        if not contributor:
+            print(f"{WARN} Could not determine who owns this hot-spot.")
 
     print()
+
+    print(f"{INFO} All of the presented information were extracted from http://localhost:{config.sonarqube_port}.")
 
     return ret
 
@@ -509,29 +546,38 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
 
     if config.ignore_remote_repo:
         print(f"{INFO} Skipping as 'config.ignore_remote_repo = True'")
-        return (RemoteRepository("", ""), {})
+        return (GithubRepository("", ""), {})
 
     start_date = commit_range.hist_commit.committed_datetime
-    end_date = commit_range.head_commit.committed_datetime
+    end_date = commit_range.head_commit.committed_datetime.replace(hour=23, minute=59, second=59, microsecond=999999)
 
     remote_url = repo.remote(name=config.default_remote_name).url
     project = parse_project(remote_url, config.gitlab_access_token, config.github_access_token)
 
     remote_weight_model = RemoteRepositoryWeightModel.load()
 
+    restricted_issues = [x for x in project.issues if x.created_at > start_date and x.created_at < end_date or
+                         x.closed_at is not None and x.closed_at > start_date and x.closed_at < end_date]
+    restricted_prs = [x for x in project.pull_requests if x.created_at > start_date and x.created_at < end_date or
+                      x.merged_at is not None and x.merged_at > start_date and x.merged_at < end_date]
+
     print(f"Project: {project.name}")
-    print(f"{ISSUES} Total issues: {len(project.issues)}")
-    print(f"{PULL_REQUESTS} Total pull requests: {len(project.pull_requests)}")
+    print(f"{ISSUES} Total issues: {len(restricted_issues)}")
+    print(f"{PULL_REQUESTS} Total pull requests: {len(restricted_prs)}")
     print(f"{CONTRIBUTOR} Total contributors: {len(project.members)}")
+    remote_url_print = remote_url if not config.anonymous_mode else "'<anonymous_remote_url>'"
+    print(f"{INFO} All of the presented information were extracted from {remote_url_print}.")
+    print(f"{INFO} Checking for issues and pull requests between {start_date} and {end_date}.")
+    print()
 
     contributor_weight: ContributorWeight = defaultdict(lambda: 0.0)
 
-    for issue in project.issues:
+    for issue in restricted_issues:
         author_contributor = find_contributor(contributors, issue.author)
         header(f"{ISSUES} Issue: {issue.name} - by "
                f"{author_contributor.name if author_contributor is not None else 'None'}")
         print(f"Description: {issue.description}")
-        print(f"State: {issue.state}")
+        # print(f"State: {issue.state}") # TODO this is not very intuitive
         assignee = find_contributor(contributors, issue.assigned_to)
         closer = find_contributor(contributors, issue.closed_by)
         if issue.assigned_to:
@@ -552,15 +598,16 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
             contributor_weight[author_contributor] += issue_weight
 
         print(f"{WEIGHT} Weight {issue_weight} - Beneficiaries: {', '.join(map(lambda x: x.name, beneficiaries))}")
+        print()
 
-    for pr in project.pull_requests:
+    for pr in restricted_prs:
         author_contributor = find_contributor(contributors, pr.author)
         print()
         header(f"{PULL_REQUESTS} Pull request: {pr.name} - by "
                f"{(author_contributor.name if author_contributor is not None else 'None')}")
         print(f"From: {pr.source_branch} to {pr.target_branch}")
         print(f"Description: {pr.description}")
-        print(f"State: {pr.merge_status}")
+        # print(f"State: {pr.merge_status}") # TODO this reports can_be_merged, while already merged
         merger = find_contributor(contributors, pr.merged_by)
         if pr.merged_at is not None:
             print(f"Merged at: {pr.merged_at} by "
@@ -576,6 +623,7 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
             contributor_weight[author_contributor] += pr_weight
 
         print(f"{WEIGHT} Weight {pr_weight} - Beneficiaries: {', '.join(map(lambda x: x.name, beneficiaries))}")
+        print()
 
     return project, contributor_weight
 
@@ -793,7 +841,7 @@ def summary_info(contributors: List[Contributor],
                     sums[contributor] += section[contributor]
 
     separator()
-    print(f"{WEIGHT} Total weight per contributor for {SYNTAX} Syntax:")
+    print(f"{WEIGHT} Total weight per contributor for {SYNTAX} SonarQube analysis:")
     print_section(syntactic_weights)
 
     separator()
@@ -847,7 +895,7 @@ def display_results(repo: git.Repo,
     separator()
     global_rule_weight_multiplier = rule_info(config, repo, ownership, contributors)
     separator()
-    syntax_weights = syntax_info(config, contributors, repo, project_key)
+    syntax_weights = syntax_info(config, contributors, repo, ownership, project_key)
     separator()
     semantic_weights = semantic_info(tracked_files, ownership, semantics)
     separator()

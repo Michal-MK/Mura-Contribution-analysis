@@ -17,7 +17,7 @@ class SemanticsAnalyzerTest(unittest.TestCase):
             for file in group.files:
                 print(file)
                 if file.suffix == ".cs":
-                    _, weight = compute_semantic_weight(file.absolute())
+                    _, _, weight = compute_semantic_weight(file.absolute())
                     weights.append(weight)
         pass
 
@@ -28,7 +28,7 @@ class SemanticsAnalyzerTest(unittest.TestCase):
             for file in group.files:
                 print(file)
                 if file.suffix == ".cs":
-                    model, weight = compute_semantic_weight(file.absolute())
+                    _, model, weight = compute_semantic_weight(file.absolute())
                     weights.append((model, weight))
         self.assertTrue(len(weights) == 1)
         self.assertTrue(weights[0][1].compute_weight(weights[0][0]) == 38.0)

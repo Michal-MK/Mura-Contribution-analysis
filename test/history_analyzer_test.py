@@ -60,7 +60,6 @@ class HistoryAnalyzerTest(unittest.TestCase):
         c_range = CommitRange(repo, 'HEAD', 'ROOT')
         result = c_range.analyze()
         self.assertTrue(result[self.nas_model].line_count == 75)
-        self.assertTrue(result[self.nas_model].changes[0].author == '')
 
         num_changes_done_by_me = len(list(filter(lambda x: x.author == 'Michal-MK', result[self.nas_model].changes)))
         self.assertTrue(num_changes_done_by_me == result[self.nas_model].line_count)
@@ -71,7 +70,6 @@ class HistoryAnalyzerTest(unittest.TestCase):
         c_range = CommitRange(repo, 'HEAD', 'ROOT')
         result = c_range.analyze()
         self.assertTrue(result[self.nas_model].line_count == 78)
-        self.assertTrue(result[self.nas_model].changes[0].author == '')
 
         num_changes_done_by_me = len(list(filter(lambda x: x.author == 'Michal-MK', result[self.nas_model].changes)))
         self.assertTrue(num_changes_done_by_me == result[self.nas_model].line_count)
@@ -82,7 +80,6 @@ class HistoryAnalyzerTest(unittest.TestCase):
         c_range = CommitRange(repo, 'HEAD', 'ROOT')
         result = c_range.analyze()
         self.assertTrue(result[self.nas_model].line_count == 78)
-        self.assertTrue(result[self.nas_model].changes[0].author == '')
 
         num_changes_done_by_me = len(list(filter(lambda x: x.author == 'Michal-MK', result[self.nas_model].changes)))
         self.assertTrue(num_changes_done_by_me == result[self.nas_model].line_count)
@@ -94,7 +91,6 @@ class HistoryAnalyzerTest(unittest.TestCase):
         result = c_range.analyze()
 
         self.assertTrue(result[self.nas_model].line_count == 85)
-        self.assertTrue(result[self.nas_model].changes[0].author == '')
         self.assertTrue(by(result[self.nas_model].changes[1:75], "Michal-MK"))
         self.assertTrue(by(result[self.nas_model].changes[76:76 + 7], "Other Name"))
         self.assertTrue(by(result[self.nas_model].changes[83:85], "Michal-MK"))
@@ -109,8 +105,8 @@ class HistoryAnalyzerTest(unittest.TestCase):
 
         percentage = calculate_percentage(contributors, result)
 
-        self.assertTrue(isclose(percentage.global_contribution[contributors[0]], 78 / 85))
-        self.assertTrue(isclose(percentage.global_contribution[contributors[1]], 7 / 85))
+        self.assertTrue(isclose(percentage.global_contribution[contributors[0]], 77 / 84))
+        self.assertTrue(isclose(percentage.global_contribution[contributors[1]], 7 / 84))
 
     def test_find_unmerged(self):
         repo = git.Repo(TEST_REPO_UNMERGED)

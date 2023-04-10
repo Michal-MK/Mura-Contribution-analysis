@@ -14,7 +14,9 @@ class Configuration:
     def __init__(self):
         self.full_ownership_min_threshold = 0.8
         self.ownership_min_threshold = 0.2
-        self.rule_violation_multiplier = 0.9
+        self.file_rule_violation_multiplier = 0.9
+        self.issue_rule_violation_multiplier = 0.98
+        self.pr_rule_violation_multiplier = 0.9
         self.base_hour_match_weight = 200.0
         self.hour_estimate = 24.0
         self.sonar_blocker_severity_weight = -50.0

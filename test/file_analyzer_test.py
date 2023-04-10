@@ -38,7 +38,7 @@ class FileAnalyzerTest(unittest.TestCase):
 
         file = list(result.values())[0]
 
-        content = file.history['9b894474f7edde7e7c94e694cb588d4db0c00c29']
+        content = file.history['cd342dba8fe190e9cc645334b8793612ed1bbc38']
 
         self.assertTrue(file.line_count == 5)
         self.assertTrue(content.content[0].author == 'Michal-MK')
