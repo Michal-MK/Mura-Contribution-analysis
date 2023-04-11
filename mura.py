@@ -960,11 +960,11 @@ def display_results() -> None:
     tracked_files = get_tracked_files(repo, verbose=True)
     history_analysis = commit_range.analyze()
     local_syntax = local_syntax_analysis(config, tracked_files)
-    # semantics = semantic_analysis.compute_semantic_weight_result(config, tracked_files)
+    semantics = semantic_analysis.compute_semantic_weight_result(config, tracked_files)
     contributors = display_contributor_info(commit_range, config)
 
     percentage, ownership = percentage_info(history_analysis, contributors, config)
-    local_syntax_info(config, ownership, local_syntax)
+    local_syntax_info(config, ownership, local_syntax, repo)
 
     contributors = display_contributor_info(commit_range, config)
     separator()
@@ -980,7 +980,7 @@ def display_results() -> None:
     separator()
     syntax_weights = syntax_info(config, contributors, repo, ownership, project_key)
     separator()
-    local_syntax_info(config, ownership, local_syntax)
+    local_syntax_info(config, ownership, local_syntax, repo)
     separator()
     semantic_weights = semantic_info(tracked_files, ownership, semantics)
     separator()
