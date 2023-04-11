@@ -1,0 +1,5 @@
+# CSV like format
+# <weight>, <match_distance>, <pattern>
+# One statement per line, pattern can therefore only match one line, new lines in the pattern are not allowed
+# <match_distance> is the number of string modifications while the string is still considered a match
+# i.e. 0 means exact match, 2 means two modifications are allowed, comparison is done on stripped lines! no whitespace!

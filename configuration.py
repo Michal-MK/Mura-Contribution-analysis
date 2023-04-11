@@ -17,6 +17,9 @@ class Configuration:
         self.file_rule_violation_multiplier = 0.9
         self.issue_rule_violation_multiplier = 0.98
         self.pr_rule_violation_multiplier = 0.9
+        self.single_file_weight = 5.0
+        self.max_line_length = 120
+        self.over_max_line_length_weight = -10
         self.base_hour_match_weight = 200.0
         self.hour_estimate = 24.0
         self.sonar_blocker_severity_weight = -50.0

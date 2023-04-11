@@ -190,13 +190,13 @@ def compute_semantic_weight_grouped(config: Configuration, file_group: FileGroup
     return unsorted_ret
 
 
-def compute_semantic_weight_result(config: Configuration, file_group: List[FileGroup], verbose=False) \
+def compute_semantic_weight_result(config: Configuration, file_groups: List[FileGroup], verbose=False) \
         -> List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]]:
-    total_groups = len(file_group)
+    total_groups = len(file_groups)
     counter = 1
     start = time.time()
     ret = []
-    for group in file_group:
+    for group in file_groups:
         grouped_semantic_weight = compute_semantic_weight_grouped(config, group)
         ret.append(grouped_semantic_weight)
         progress = time.time()

@@ -14,10 +14,14 @@ from matplotlib.dates import date2num, DateFormatter, drange
 from sonarqube import SonarQubeClient
 from sonarqube.utils.exceptions import AuthError
 
+import file_analyzer
+import semantic_analysis
 from configuration import Configuration, start_sonar
+from file_analyzer import FileWeight
 from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
 from lib import FileGroup, Contributor, get_contributors, compute_file_ownership, find_contributor, \
-    stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles, repo_p
+    stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles, repo_p, \
+    get_tracked_files
 from remote_repository_weight_model import RemoteRepositoryWeightModel
 from repository_hooks import parse_project, Issue, RemoteRepository, GithubRepository
 from semantic_analysis import LangElement
@@ -307,6 +311,18 @@ def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, Li
     return ret
 
 
+def local_syntax_analysis(config: Configuration, grouped_files: List[FileGroup]) -> Dict[Path, FileWeight]:
+    ret: Dict[Path, FileWeight] = {}
+    for group in grouped_files:
+        for file in group.files:
+            result = file_analyzer.compute_syntactic_weight(file, config)
+            if not result:
+                print(f"{INFO} Could not read text from {file} -> Unsupported format or Binary file!")
+                continue
+            ret[file] = result
+    return ret
+
+
 def start_sonar_analysis(config: Configuration, repository_path: str) -> Optional[str]:
     if not config.use_sonarqube:
         print(f"{INFO} Syntax analysis uses SonarQube and 'config.use_sonarqube = False'. Skipping syntax analysis.")
@@ -385,6 +401,63 @@ def start_sonar_analysis(config: Configuration, repository_path: str) -> Optiona
         raise e
 
     return project_key
+
+
+def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[ContributionDistribution]],
+                      local_syntax: Dict[Path, FileWeight], repo: Repo, n_extreme_files: int = 5) -> ContributorWeight:
+    header("Raw file weights:")
+
+    assert n_extreme_files >= 0, "n_extreme_files must be non-negative."
+
+    highest_weighted_files = [(-math.inf, Path()) for _ in range(n_extreme_files)]
+    lowest_weighted_files = [(math.inf, Path()) for _ in range(n_extreme_files)]
+
+    lowest_index = 0
+    highest_index = 0
+
+    print(f"{INFO} Base file weight: {config.single_file_weight}")
+
+    ret: ContributorWeight = defaultdict(lambda: 0.0)
+    per_contributor = defaultdict(list)
+
+    for file, weight in local_syntax.items():
+        if n_extreme_files > 0:
+            if weight.file_weight < lowest_weighted_files[highest_index][0]:
+                lowest_weighted_files[highest_index] = (weight.file_weight, file)
+                highest_index = lowest_weighted_files.index(max(lowest_weighted_files, key=lambda x: x[0]))
+            if weight.file_weight > highest_weighted_files[lowest_index][0]:
+                highest_weighted_files[lowest_index] = (weight.file_weight, file)
+                lowest_index = highest_weighted_files.index(min(highest_weighted_files, key=lambda x: x[0]))
+
+        contributor = get_owner(ownership, file)
+        print(f" - {file} -> {WEIGHT} Weight: {weight.file_weight}")
+        if not contributor:
+            continue
+        per_contributor[contributor].append(weight)
+        ret[contributor] += weight.syntactic_weight
+
+    print()
+    print("Averages:")
+
+    for contrib, weights in per_contributor.items():
+        print(f"{CONTRIBUTOR} {contrib.name} - {WEIGHT} Average weight: "
+              f"{sum(map(lambda x: x.file_weight, weights)) / len(weights)}")
+
+    print()
+    if n_extreme_files > 0:
+        print(f"{INFO} Largest files:")
+        for x in sorted(highest_weighted_files, key=lambda x: x[0], reverse=True):
+            owner = get_owner(ownership, x[1])
+            name = owner.name if owner is not None else "None"
+            print(f" => {repo_p(str(x[1]), repo)} ({x[0]}) by {CONTRIBUTOR}: {name}")
+        print(f"{INFO} Smallest files:")
+        for x in sorted(lowest_weighted_files, key=lambda x: x[0]):
+            owner = get_owner(ownership, x[1])
+            name = owner.name if owner is not None else "None"
+            print(f" => {repo_p(str(x[1]), repo)} ({x[0]}) by {CONTRIBUTOR}: {name}")
+
+    return ret
+
 
 def syntax_info(config: Configuration, contributors: List[Contributor], repo: Repo,
                 file_ownership: Dict[Contributor, List[ContributionDistribution]],
@@ -874,13 +947,25 @@ def summary_info(contributors: List[Contributor],
         position += 1
 
 
-def display_results(repo: git.Repo,
-                    commit_range: CommitRange,
-                    syntax: AnalysisResult,
-                    tracked_files: List[FileGroup],
-                    semantics: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
-                    config: Configuration,
-                    project_key: str) -> None:
+def display_results() -> None:
+    repository_path = r"C:\MUNI\last\Java\M1\airport-manager"
+    project_key = ""
+    repo = git.Repo(repository_path)
+    commit_range = CommitRange(repo, "HEAD", "ROOT", verbose=False)
+
+    config_path = Path("configuration_data/configuration.txt")
+    rules_path = Path("configuration_data/rules.txt")
+    config = Configuration.load_from_file(config_path, rules_path, verbose=False)
+
+    tracked_files = get_tracked_files(repo, verbose=True)
+    history_analysis = commit_range.analyze()
+    local_syntax = local_syntax_analysis(config, tracked_files)
+    # semantics = semantic_analysis.compute_semantic_weight_result(config, tracked_files)
+    contributors = display_contributor_info(commit_range, config)
+
+    percentage, ownership = percentage_info(history_analysis, contributors, config)
+    local_syntax_info(config, ownership, local_syntax)
+
     contributors = display_contributor_info(commit_range, config)
     separator()
     commit_distribution, insertions_deletions = commit_info(commit_range, repo, contributors)
@@ -889,17 +974,19 @@ def display_results(repo: git.Repo,
     separator()
     file_flags = file_statistics_info(commit_range, contributors)
     separator()
-    percentage, ownership = percentage_info(syntax, contributors, config)
+    percentage, ownership = percentage_info(history_analysis, contributors, config)
     separator()
     display_dir_tree(config, percentage, repo)
     separator()
-    global_rule_weight_multiplier = rule_info(config, repo, ownership, contributors)
-    separator()
     syntax_weights = syntax_info(config, contributors, repo, ownership, project_key)
+    separator()
+    local_syntax_info(config, ownership, local_syntax)
     separator()
     semantic_weights = semantic_info(tracked_files, ownership, semantics)
     separator()
     project, repo_management_weights = remote_info(commit_range, repo, config, contributors)
+    separator()
+    global_rule_weight_multiplier = rule_info(config, repo, ownership, contributors, project)
     separator()
     hours = gaussian_weights(config, config.hour_estimate, hour_estimates(contributors, repo))
     separator()
@@ -908,5 +995,4 @@ def display_results(repo: git.Repo,
 
 
 if __name__ == '__main__':
-    issue = Issue("", "", "", datetime.now(), None, "", "", "")
-    assert isinstance(issue, Issue)
+    display_results()

@@ -1,0 +1,8 @@
+# CSV like format
+# <weight>, "<pattern>"
+# One statement per line, pattern can therefore only match one line, new lines in the pattern are not allowed
+# Expected weights are 0.0-1.0 inclusive, larger values are possible, but the advised against
+
+0.8, "^package .*;\\s*$"
+-1.0, "^import .*\*$"
+0.2, "^import .*;$"

@@ -1,6 +1,7 @@
 import json
 import re
-from typing import List, Dict, Any
+from pathlib import Path
+from typing import List, Dict, Any, TextIO
 
 import Levenshtein
 
@@ -9,10 +10,10 @@ from pattern_type import PatternType
 
 class SyntacticWeightModel:
     class Entry:
-        def __init__(self, pattern_type: PatternType, pattern: str, exactness: int, weight: int) -> None:
+        def __init__(self, pattern_type: PatternType, pattern: str, exactness: float, weight: float) -> None:
             self.pattern_type = pattern_type
             self.pattern = pattern
-            self.exactness = exactness
+            self.match_distance = exactness
             self.weight = weight
             self.regex_pattern = re.compile(pattern) if pattern_type == PatternType.Regex else None
 
@@ -21,7 +22,7 @@ class SyntacticWeightModel:
             Decide whether the line matches the pattern of this entry
             """
             if self.pattern_type == PatternType.Literal:
-                return Levenshtein.distance(self.pattern, line) <= self.exactness
+                return Levenshtein.distance(self.pattern, line) <= self.match_distance
             elif self.pattern_type == PatternType.Regex:
                 assert self.regex_pattern is not None
                 return self.regex_pattern.match(line) is not None
@@ -31,19 +32,31 @@ class SyntacticWeightModel:
         self.base_weight = 1
         self.weights: List[SyntacticWeightModel.Entry] = []
 
-    def load(self, file):
-        weight_map: List[Dict[str, Any]] = json.load(file)
+    def load_literals(self, file: TextIO):
+        for line in file.readlines():
+            if not line.strip() or line.startswith('#'):
+                continue
+            split = line.split(',', maxsplit=3)
+            assert len(split) == 3
+            weight = float(split[0])
+            exactness = float(split[1])
+            pattern = split[2]
+            self.weights.append(SyntacticWeightModel.Entry(PatternType.Literal, pattern, exactness, weight))
 
-        for entry in weight_map:
-            self.weights.append(SyntacticWeightModel.Entry(
-                PatternType.Literal if entry["type"] == "Literal" else PatternType.Regex,
-                entry["value"],
-                entry["exactness"] if "exactness" in entry else 0,
-                entry["weight"]
-            ))
+    def load_regex(self, file: TextIO):
+        for line in file:
+            if not line.strip() or line.startswith('#'):
+                continue
+            split = line.split(',', maxsplit=2)
+            assert len(split) == 2
+            pattern = split[1].strip()
+            assert pattern.startswith('"') and pattern.endswith('"'), f"Patterns must be enclosed in \"\"! - {pattern}"
+            self.weights.append(SyntacticWeightModel.Entry(PatternType.Regex, pattern[1:-1], 0, float(split[0])))
 
-    def get_weight(self, line: str) -> float:
+
+    def get_weight(self, line: str, line_stripped: str) -> float:
         for key in self.weights:
-            if key.matches(line):
+            if key.pattern_type == PatternType.Regex and key.matches(line) or \
+               key.pattern_type == PatternType.Literal and key.matches(line_stripped):
                 return key.weight
         return self.base_weight
