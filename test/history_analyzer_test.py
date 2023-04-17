@@ -13,6 +13,7 @@ from history_analyzer import get_file_changes, AuthorName, CommitRange, calculat
 TEST_REPO2 = Path("..\\repositories\\single_file")
 TEST_REPO_UNMERGED = Path("..\\repositories\\unmerged")
 TEST_REPO_UNMERGED_MULTIPLE = Path("..\\repositories\\unmerged_multiple")
+TEST_REPO_WHITESPACE_CHANGE = Path("..\\repositories\\whitespace")
 
 
 def by(section: List[LineMetadata], author: AuthorName):
@@ -118,28 +119,39 @@ class HistoryAnalyzerTest(unittest.TestCase):
         self.assertTrue(len(unmerged[0].path) == 3)
 
 
-def test_find_unmerged_multiple(self):
-    repo = git.Repo(TEST_REPO_UNMERGED_MULTIPLE)
-    c_range = CommitRange(repo, 'HEAD', 'ROOT')
-    unmerged = c_range.find_unmerged_branches(datetime.datetime.now().timestamp())
+    def test_find_unmerged_multiple(self):
+        repo = git.Repo(TEST_REPO_UNMERGED_MULTIPLE)
+        c_range = CommitRange(repo, 'HEAD', 'ROOT')
+        unmerged = c_range.find_unmerged_branches(datetime.datetime.now().timestamp())
 
-    unmerged.sort(key=lambda x: x.name)
+        unmerged.sort(key=lambda x: x.name)
 
-    self.assertTrue(len(unmerged) == 2)
-    self.assertTrue(unmerged[1].name == 'branch2')
-    self.assertTrue(unmerged[0].name == 'branch1 some-tag')
+        self.assertTrue(len(unmerged) == 2)
+        self.assertTrue(unmerged[1].name == 'branch2')
+        self.assertTrue(unmerged[0].name == 'branch1 some-tag')
 
-    self.assertTrue(unmerged[1].head == 'a34e9dc8bc9ee55584120e40209ac97bb388fcc9')
-    self.assertTrue(unmerged[0].head == '689a14b3823fafbd6bb927b5409692bdb02eb96a')
+        self.assertTrue(unmerged[1].head == 'a34e9dc8bc9ee55584120e40209ac97bb388fcc9')
+        self.assertTrue(unmerged[0].head == '689a14b3823fafbd6bb927b5409692bdb02eb96a')
 
-    self.assertTrue('932ccb27444ebc67fb3e83e745072902f88ec82b' in unmerged[1].path)
-    self.assertTrue('676ecb3fb829d166ad8594a54b4bd8ae4b503bd5' in unmerged[0].path)
+        self.assertTrue('932ccb27444ebc67fb3e83e745072902f88ec82b' in unmerged[1].path)
+        self.assertTrue('676ecb3fb829d166ad8594a54b4bd8ae4b503bd5' in unmerged[0].path)
 
-    self.assertTrue(unmerged[1].path[0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
-    self.assertTrue(unmerged[0].path[0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
+        self.assertTrue(unmerged[1].path[0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
+        self.assertTrue(unmerged[0].path[0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
 
-    self.assertTrue(len(unmerged[1].path) == 3)
-    self.assertTrue(len(unmerged[0].path) == 3)
+        self.assertTrue(len(unmerged[1].path) == 3)
+        self.assertTrue(len(unmerged[0].path) == 3)
+
+    def test_whitespace_change_preserves_author(self):
+        repo = git.Repo(TEST_REPO_WHITESPACE_CHANGE)
+        c_range = CommitRange(repo, 'HEAD', 'ROOT')
+        result = c_range.analyze()
+
+        file_path = Path(r"C:\MUNI\xth. semester\sdipr\src\repositories\whitespace\NasModel.cs")
+
+        file = result[Path(file_path)]
+
+        self.assertTrue(all(map(lambda x: x.author == 'Michal-MK', file.changes)))
 
 
 if __name__ == '__main__':

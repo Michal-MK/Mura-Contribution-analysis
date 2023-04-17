@@ -1,2 +1,22 @@
 full_ownership_min_threshold = 0.8
 ownership_min_threshold = 0.2
+complete_file_threshold = 0.8
+num_days_grace_period = 7
+file_rule_violation_multiplier = 0.9
+issue_rule_violation_multiplier = 0.98
+pr_rule_violation_multiplier = 0.9
+
+single_file_weight = 5.0
+max_line_length = 120
+over_max_line_length_weight = -10
+
+base_hour_match_weight = 200.0
+hour_estimate = 24.0
+
+sonar_blocker_severity_weight = -50.0
+sonar_critical_severity_weight = -10.0
+sonar_major_severity_weight = -5.0
+sonar_minor_severity_weight = -1.0
+
+sonar_security_hotspot_high_weight = 0.0
+sonar_security_hotspot_low_weight = 0.0

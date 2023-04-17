@@ -1,5 +1,7 @@
 full_ownership_min_threshold = 0.8
 ownership_min_threshold = 0.2
+complete_file_threshold = 0.8
+num_days_grace_period = 7
 file_rule_violation_multiplier = 0.9
 issue_rule_violation_multiplier = 0.98
 pr_rule_violation_multiplier = 0.9

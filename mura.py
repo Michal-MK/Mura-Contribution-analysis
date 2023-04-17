@@ -18,7 +18,7 @@ import file_analyzer
 import semantic_analysis
 from configuration import Configuration, start_sonar
 from file_analyzer import FileWeight
-from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
+from history_analyzer import AnalysisResult, calculate_percentage, CommitRange, Ownership
 from lib import FileGroup, Contributor, get_contributors, compute_file_ownership, find_contributor, \
     stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles, repo_p, \
     get_tracked_files
@@ -404,7 +404,8 @@ def start_sonar_analysis(config: Configuration, repository_path: str) -> Optiona
 
 
 def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[ContributionDistribution]],
-                      local_syntax: Dict[Path, FileWeight], repo: Repo, n_extreme_files: int = 5) -> ContributorWeight:
+                      local_syntax: Dict[Path, FileWeight], repo: Repo, file_maturity_score: Dict[Path, float],
+                      n_extreme_files: int = 5) -> ContributorWeight:
     header("Raw file weights:")
 
     assert n_extreme_files >= 0, "n_extreme_files must be non-negative."
@@ -430,6 +431,10 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
                 lowest_index = highest_weighted_files.index(min(highest_weighted_files, key=lambda x: x[0]))
 
         contributor = get_owner(ownership, file)
+        mult_note = ""
+        if file in file_maturity_score:
+            weight *= file_maturity_score[file]
+            mult_note = f" adjusted *({file_maturity_score[file]})"
         print(f" - {file} -> {WEIGHT} Weight: {weight.file_weight}")
         if not contributor:
             continue
@@ -459,9 +464,9 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
     return ret
 
 
-def syntax_info(config: Configuration, contributors: List[Contributor], repo: Repo,
-                file_ownership: Dict[Contributor, List[ContributionDistribution]],
-                project_key: str) -> ContributorWeight:
+def sonar_info(config: Configuration, contributors: List[Contributor], repo: Repo,
+               file_ownership: Dict[Contributor, List[ContributionDistribution]],
+               project_key: str) -> ContributorWeight:
     header(f"{SYNTAX} Syntax + Semantics using SonarQube:")
 
     if not config.use_sonarqube:
@@ -577,7 +582,8 @@ def syntax_info(config: Configuration, contributors: List[Contributor], repo: Re
 
 def semantic_info(tracked_files: List[FileGroup],
                   ownership: Dict[Contributor, List[ContributionDistribution]],
-                  semantics: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]]) \
+                  semantics: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
+                  file_maturity_score: Dict[Path, float]) \
         -> ContributorWeight:
     header(f"{SEMANTICS} Semantics:")
 
@@ -602,7 +608,12 @@ def semantic_info(tracked_files: List[FileGroup],
                   f"Fields: {len(list(structure.fields))} "
                   f"Comments: {len(list(structure.comments))} ")
             weight = structure.compute_weight(group_sem[j][1])
-            print(f"{WEIGHT} Semantic file weight: {weight}")
+            mult_note = ""
+            if group.files[j] in file_maturity_score:
+                weight *= file_maturity_score[group.files[j]]
+                mult_note = f" adjusted *({file_maturity_score[group.files[j]]})"
+            print(f"{WEIGHT} Semantic file weight: {weight}" + mult_note)
+
             if owner is not None:
                 contributor_weight[owner] += weight
             total_weight += weight
@@ -895,11 +906,13 @@ def gaussian_weights(configuration: Configuration, hour_estimate: float,
 
 
 def summary_info(contributors: List[Contributor],
-                 syntactic_weights: ContributorWeight,
+                 sonar_weights: ContributorWeight,
                  semantic_weights: ContributorWeight,
+                 local_syntax: ContributorWeight,
                  repo_management_weights: ContributorWeight,
                  global_rule_weight_multiplier: GlobalRuleWeightMultiplier,
-                 hours: ContributorWeight) -> None:
+                 hours: ContributorWeight,
+                 file_history_multipliers: Dict[Path, float]) -> None:
     sums: Dict[Contributor, float] = defaultdict(lambda: 0.0)
 
     def print_section(section: ContributorWeight, add=True):
@@ -914,12 +927,16 @@ def summary_info(contributors: List[Contributor],
                     sums[contributor] += section[contributor]
 
     separator()
-    print(f"{WEIGHT} Total weight per contributor for {SYNTAX} SonarQube analysis:")
-    print_section(syntactic_weights)
+    print(f"{WEIGHT} Total weight per contributor for {CUBE} SonarQube analysis:")
+    print_section(sonar_weights)
 
     separator()
     print(f"{WEIGHT} Total weight per contributor for {SEMANTICS} Semantics:")
     print_section(semantic_weights)
+
+    separator()
+    print(f"{WEIGHT} Total weight per contributor for {SYNTAX} Syntax:")
+    print_section(local_syntax)
 
     separator()
     print(f"{WEIGHT} Total weight per contributor for {REMOTE_REPOSITORY} Remote repository management:")
@@ -932,6 +949,13 @@ def summary_info(contributors: List[Contributor],
     separator()
     print(f"{WEIGHT}{WARN} Weight multiplier for unfulfilled {RULES} Rules:")
     print_section(global_rule_weight_multiplier, add=False)
+
+    separator()
+    print(f"{WEIGHT}{WARN} Total multiplier for file history:")
+    print(f"{INFO} This multiplier is applied to: {SEMANTICS} Semantics and {SYNTAX} Syntax, "
+          f"the above results are WITH the multiplier.")
+    for path, multiplier in [x for x in file_history_multipliers.items() if x[1] != 1.0]:
+        print(f" -> {path}: {multiplier}")
 
     separator()
     print(f"{WEIGHT} Total weight per contributor:")
@@ -958,7 +982,12 @@ def display_results() -> None:
     config = Configuration.load_from_file(config_path, rules_path, verbose=False)
 
     tracked_files = get_tracked_files(repo, verbose=True)
+
+
+
     history_analysis = commit_range.analyze()
+    scored_files = file_analyzer.assign_scores(tracked_files, history_analysis, config)
+
     local_syntax = local_syntax_analysis(config, tracked_files)
     semantics = semantic_analysis.compute_semantic_weight_result(config, tracked_files)
     contributors = display_contributor_info(commit_range, config)
@@ -978,11 +1007,11 @@ def display_results() -> None:
     separator()
     display_dir_tree(config, percentage, repo)
     separator()
-    syntax_weights = syntax_info(config, contributors, repo, ownership, project_key)
+    sonar_weights = sonar_info(config, contributors, repo, ownership, project_key)
     separator()
-    local_syntax_info(config, ownership, local_syntax, repo)
+    local_syntax_weights = local_syntax_info(config, ownership, local_syntax, repo, scored_files)
     separator()
-    semantic_weights = semantic_info(tracked_files, ownership, semantics)
+    semantic_weights = semantic_info(tracked_files, ownership, semantics, scored_files)
     separator()
     project, repo_management_weights = remote_info(commit_range, repo, config, contributors)
     separator()
@@ -990,8 +1019,8 @@ def display_results() -> None:
     separator()
     hours = gaussian_weights(config, config.hour_estimate, hour_estimates(contributors, repo))
     separator()
-    summary_info(contributors, syntax_weights, semantic_weights, repo_management_weights, global_rule_weight_multiplier,
-                 hours)
+    summary_info(contributors, sonar_weights, semantic_weights, local_syntax_weights, repo_management_weights,
+                 global_rule_weight_multiplier, hours, scored_files)
 
 
 if __name__ == '__main__':

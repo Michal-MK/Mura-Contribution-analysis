@@ -28,6 +28,8 @@ class Configuration:
         self.sonar_minor_severity_weight = -1.0
         self.sonar_security_hotspot_high_weight = 0.0
         self.sonar_security_hotspot_low_weight = 0.0
+        self.complete_file_threshold = 0.8
+        self.num_days_grace_period = 7
         self.remote_service = "https://gitlab.fi.muni.cz"
         self.gitlab_access_token = ""
         self.github_access_token = ""
@@ -38,6 +40,7 @@ class Configuration:
         self.sonarqube_port = 8085
         self.sonarqube_login = "admin"
         self.sonarqube_password = "admin"
+        self.check_whitespace_changes = True
         self.ignore_remote_repo = False
         self.anonymous_mode = False
         self.ignored_extensions: List[str] = []

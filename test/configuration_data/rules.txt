@@ -1,1 +1,15 @@
+# Space separated, one line per pattern.
+# The format is: <contributor> <directory> <file> <amount> | <constraint>
+# <contributor> is the name of the contributor or * for all contributors.
+# <directory> is the directory to look in, standard wildcards are supported for directories.
+# <file> is the file to look for, standard wildcards are supported for files.
+# <amount> is the expected number of matches the contributor should have.
 * "*/" ".*Controller.*\.java" >=1
+* "*/" ".*Test.*\.java" >=1 | $DIR_TREE=="*/src/test/java" && $OWN(*/src/) != $OWNER
+* "*/" "pom\.xml" >=1
+# 'r' prefix is for rules for remote repositories
+# <contributor> is the name of the contributor or * for all contributors.
+# <object_type> enumeration, supported objects are issues (issue) and pull requests (pr)
+# <amount> is the expected number of matches the contributor should have.
+r* pr >=1
+r* issue >=1

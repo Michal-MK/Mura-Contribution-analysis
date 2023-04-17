@@ -1,4 +1,5 @@
 import copy
+import datetime
 import re
 from collections import deque, defaultdict
 from datetime import timedelta
@@ -29,9 +30,10 @@ CONFLICT_B_NAME: re.Pattern = re.compile(r"\+\+\+ b/(.*)\s")
 
 
 class OwnershipHistory:
-    def __init__(self, commit: str, content: List['LineMetadata']):
+    def __init__(self, commit: str, content: List['LineMetadata'], lines_changed: int):
         self.commit = commit
         self.content = content
+        self.lines_changed = lines_changed
 
     def __str__(self):
         return f"{self.commit} - Lines: {len(self.content)}"
@@ -41,9 +43,10 @@ class OwnershipHistory:
 
 
 class LineMetadata:
-    def __init__(self, author='', content: str = ''):
+    def __init__(self, author: str, content: str, change_date: datetime.datetime):
         self.author = author
         self.content = content
+        self.change_date = change_date
 
     @property
     def is_blank(self):
@@ -51,18 +54,6 @@ class LineMetadata:
 
     def __str__(self):
         return f"{self.author}: {self.content}"
-
-    def __repr__(self):
-        return self.__str__()
-
-
-class UnapplicableHunk:
-    def __init__(self, ownership: 'Ownership', hunk: 'FileSection'):
-        self.hunk = hunk
-        self.ownership = ownership
-
-    def __str__(self):
-        return f"{self.hunk} is not applicable to {self.ownership}"
 
     def __repr__(self):
         return self.__str__()
@@ -99,6 +90,20 @@ class CommitRange:
         remote_marked_commits = [y.split() for y in remote_marks.splitlines() if len(y.split()) == 1]
 
         merged_marked_commits = [y.split() for y in marks.splitlines()]
+
+        to_remove = []
+
+        for x in merged_marked_commits:
+            if x[1].startswith('refs/tags'):
+                resolved = self.repo.git.execute(['git', 'rev-list', '-n', '1', x[1]])
+                assert isinstance(resolved, str)
+                idx = list(map(lambda x: x[0], merged_marked_commits)).index(resolved)
+                merged_marked_commits[idx][1] = merged_marked_commits[idx][1] + ' ' + x[1]
+                to_remove.append(x)
+
+        for x in to_remove:
+            merged_marked_commits.remove(x)
+
         marker_list = [(str(x[0]), str(x[1]).replace('refs/heads/', '').replace('refs/tags/', ''))
                        for x in merged_marked_commits]
 
@@ -161,13 +166,13 @@ class CommitRange:
         return result
 
     def populate_previously_unseen_file(self, change: 'Change', commit_hash: str, file_name: str,
-                                        ret: Dict[Path, 'Ownership']) -> None:
+                                        ret: Dict[Path, 'Ownership'], commit_date: datetime.datetime) -> None:
         file_path = posix_repo_p(file_name, self.repo)
         pl_path = Path(file_path)
         # Obtain the previous version of the file as a base
         content = self.checkout_file_from(commit_hash, file_path)
-        ret[pl_path] = Ownership(pl_path, len(content.splitlines(keepends=True)), content)
-        ret[pl_path].apply_change(change.hunks, commit_hash, self.repo, change.author)
+        ret[pl_path] = Ownership(pl_path, len(content.splitlines(keepends=True)), content, commit_date, commit_hash, change.author)
+        ret[pl_path].apply_change(change.hunks, commit_hash, self.repo, change.author, commit_date)
 
     def analyze(self, verbose=False) -> AnalysisResult:
         """
@@ -184,6 +189,7 @@ class CommitRange:
             if verbose:
                 print(f"{INFO} Analyzing commit {commit_hash} ({index}/{len(path)})")
                 index += 1
+            commit_date = self.commit(commit_hash).committed_datetime
             file_ownership = get_file_changes(self, commit_hash, self.repo)
             for file_name, change in file_ownership.items():
                 if file_name not in ret:
@@ -194,26 +200,34 @@ class CommitRange:
                             ret[file_name].file = file_name
                             del ret[change.previous_name]
                         else:
-                            self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret)
-                        ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author)
+                            self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret, commit_date)
+                        ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author, commit_date)
                     elif change.hunks and change.hunks[0].mode == 'A':
                         ret[file_name] = Ownership(file_name, change.hunks[0].change_end, change.hunks[0].content,
-                                                   change.author)
+                                                   commit_date, commit_hash, change.author)
                     elif not change.hunks:
                         # This is a binary file or empty file
-                        ret[file_name] = Ownership(file_name, -1, '', change.author)
+                        ret[file_name] = Ownership(file_name, -1, '', commit_date, commit_hash, change.author)
                     elif change.hunks[0].mode == 'M':
                         # This file already existed in the repo, this can occur if the analysis does not
                         # start from the first commit
-                        self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret)
+                        self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret, commit_date)
                     continue
 
                 elif file_name in ret and change.hunks and change.hunks[0].mode == 'A' and not ret[file_name].exists:
                     # This file was deleted in a previous commit and re-added in this commit
                     ret[file_name].exists = True
-                    ret[file_name].changes = [LineMetadata(change.author, ) for _ in range(change.hunks[0].change_end)]
-                    ret[file_name]._line_count = change.hunks[0].change_end
-                    ret[file_name].history[commit_hash] = OwnershipHistory(commit_hash, ret[file_name].changes)
+                    hunk = change.hunks[0]
+                    split = hunk.content.splitlines(keepends=True)
+                    Ownership.fix_length(hunk, split)
+
+                    for l in range(1, hunk.new_len + 1):
+                        content_index = hunk.change_start - 1 + hunk.new_len - l
+                        text = split[content_index]
+                        ret[file_name].changes.insert(hunk.prev_start, LineMetadata(change.author, text, commit_date))
+                    ret[file_name].line_count = hunk.new_len
+                    ret[file_name].history[commit_hash] = OwnershipHistory(commit_hash, ret[file_name].changes,
+                                                                           change.hunks[0].change_end)
                     continue
 
                 elif file_name in ret and change.hunks and change.hunks[0].mode == 'D':
@@ -232,12 +246,11 @@ class CommitRange:
                         print(f"{INFO} One cause for this is Windows NTFS being case insensitive. "
                               f"Or a merge conflict will happen.")
                         ret[file_name] = Ownership(file_name, change.hunks[0].change_end, change.hunks[0].content,
-                                                   change.author)
+                                                   commit_date, commit_hash, change.author)
                         print()
                     continue
 
-                ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author)
-
+                ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author, commit_date)
 
         if verbose:
             print()
@@ -332,7 +345,9 @@ class CommitRange:
                 assert isinstance(author, str)
                 contrib = find_contributor(contributors, author)
                 assert contrib is not None
-                print(hexsha + f" {RIGHT_ARROW} {COMMIT} Commit: {commit.message.splitlines()[0]} ({contrib.name})")
+                commit_header = str(commit.message.splitlines()[0])
+
+                print(hexsha + f" {RIGHT_ARROW} {COMMIT} Commit: {commit_header} ({contrib.name})")
         if not unmerged_content:
             print(f'{SUCCESS} No unmerged branches found! Everything is in the "{config.default_branch}" branch!')
 
@@ -372,7 +387,8 @@ class Change:
 
 
 class Ownership:
-    def __init__(self, file: Path, init_line_count: int, initial_content: str, author: str = '') -> None:
+    def __init__(self, file: Path, init_line_count: int, initial_content: str, first_date: datetime.datetime,
+                 commit_hash: str, author: str = '') -> None:
         self.file = file
         self.history: Dict[str, OwnershipHistory] = {}
         split = initial_content.splitlines(keepends=True)
@@ -385,37 +401,54 @@ class Ownership:
         else:
             pass
             # Empty file or binary file
-        self.changes: List[LineMetadata] = [LineMetadata(author, split[i]) for i in range(init_line_count)]
+        self.changes: List[LineMetadata] = [LineMetadata(author, split[i], first_date) for i in range(init_line_count)]
         if not self.changes or init_line_count == -1:
             # Empty file or binary file
-            self.changes = [LineMetadata(author, '')]
+            self.changes = [LineMetadata(author, '', first_date)]
         self.line_count = init_line_count  # Lines are indexes starting with 1
         self.exists = True
+
+        self.history[commit_hash] = OwnershipHistory(commit_hash, copy.deepcopy(self.changes), init_line_count)
 
     @property
     def content(self):
         return ''.join(map(lambda x: x.content, self.changes))
 
     def delete(self, commit_hash: str):
-        self.history[commit_hash] = OwnershipHistory(commit_hash, copy.deepcopy(self.changes))
+        self.history[commit_hash] = OwnershipHistory(commit_hash, copy.deepcopy(self.changes), self.line_count)
         self.changes = []
         self._line_count = 0
         self.exists = False
 
-    def apply_change(self, hunks: List[FileSection], commit_hash: str, repo: Repo, author: AuthorName) -> None:
+    def _fix_file(self, repo: Repo, commit_hash: str, date: datetime.datetime) -> None:
+        blame_res = repo.blame(commit_hash, posix_repo_p(str(self.file), repo))
+        assert blame_res is not None
+        self.changes = []
+        for section in blame_res:
+            commit = section[0]
+            assert isinstance(commit, Commit)
+            lines = section[1]
+            assert isinstance(lines, list)
+            self.changes.extend([LineMetadata(commit.author.name, str(line), date) for line in lines])
+            self.line_count = len(self.changes)
+
+    def apply_change(self, hunks: List[FileSection], commit_hash: str, repo: Repo,
+                     author: AuthorName, date: datetime.datetime) -> None:
         assert not any(map(lambda x: x.mode in ['A', 'D'], hunks)), \
             "This function can only be used to add changes to existing files."
 
         if self.line_count == -1:
             # This is a binary file
-            self.changes[0] = LineMetadata(author, '\1')
+            self.changes[0] = LineMetadata(author, '\1', date)
             return
 
         new_file_index_offset = 0
+        abs_changes = 0
 
         for hunk in hunks:
             if hunk.mode == 'CONFLICT':
-                self._apply_conflict_resolution(author, hunk)
+                self._apply_conflict_resolution(author, hunk, date)
+                abs_changes += hunk.length_difference
                 continue
 
             if hunk.prev_len == 0:
@@ -427,56 +460,47 @@ class Ownership:
                     index = hunk.change_start - 1 + hunk.new_len - l
                     text = split[index]
                     self.changes.insert(hunk.prev_start + new_file_index_offset,
-                                        LineMetadata(author, text))
+                                        LineMetadata(author, text, date))
                 new_file_index_offset += hunk.new_len
+                abs_changes += hunk.new_len
                 self.line_count += hunk.new_len
             elif hunk.new_len == 0:
                 # This is a deletion
                 for _ in range(hunk.prev_len):
                     try:
                         self.changes.pop(hunk.change_start)
-                    except IndexError as e:
-                        blame_res = repo.blame(commit_hash, posix_repo_p(str(self.file), repo))
-                        assert blame_res is not None
-                        self.changes = []
-                        for section in blame_res:
-                            commit = section[0]
-                            assert isinstance(commit, Commit)
-                            lines = section[1]
-                            assert isinstance(lines, list)
-                            self.changes.extend([LineMetadata(commit.author.name, line) for line in lines])
-                            self.line_count = len(self.changes)
+                    except IndexError:
+                        self._fix_file(repo, commit_hash, date)
 
                 new_file_index_offset -= hunk.prev_len
+                abs_changes += hunk.prev_len
                 self.line_count -= hunk.prev_len
             else:
                 split = hunk.content.splitlines(keepends=True)
                 self.fix_length(hunk, split)
                 # This is a change
-                new_meta = [LineMetadata(author, split[hunk.change_start - 1 + i]) for i in range(hunk.new_len)]
+                new_meta = [LineMetadata(author, split[hunk.change_start - 1 + i], date) for i in range(hunk.new_len)]
                 file_start = hunk.prev_start - 1 + new_file_index_offset
+                prev_line_authors = []
                 for i in range(hunk.prev_len):
                     try:
+                        prev_line_authors.append((self.changes[file_start].author, self.changes[file_start].content))
                         self.changes.pop(file_start)
-                    except IndexError as e:
-                        blame_res = repo.blame(commit_hash, posix_repo_p(str(self.file), repo))
-                        assert blame_res is not None
-                        self.changes = []
-                        for section in blame_res:
-                            commit = section[0]
-                            assert isinstance(commit, Commit)
-                            lines = section[1]
-                            assert isinstance(lines, list)
-                            self.changes.extend([LineMetadata(commit.author.name, line) for line in lines])
-                            self.line_count = len(self.changes)
+                    except IndexError:
+                        self._fix_file(repo, commit_hash, date)
                 for i in range(hunk.new_len):
+                    if hunk.new_len - 1 - i < len(prev_line_authors) and \
+                            new_meta[hunk.new_len - 1 - i].content.strip() == \
+                            prev_line_authors[hunk.new_len - 1 - i][1].strip():
+                        new_meta[hunk.new_len - 1 - i].author = prev_line_authors[hunk.new_len - 1 - i][0]
                     self.changes.insert(file_start, new_meta[hunk.new_len - 1 - i])
                 new_file_index_offset += hunk.length_difference
+                abs_changes += hunk.length_difference
                 self.line_count += hunk.length_difference
 
-        self.history[commit_hash] = OwnershipHistory(commit_hash, copy.deepcopy(self.changes))
+        self.history[commit_hash] = OwnershipHistory(commit_hash, copy.deepcopy(self.changes), abs_changes)
 
-    def _apply_conflict_resolution(self, author: str, hunk: FileSection):
+    def _apply_conflict_resolution(self, author: str, hunk: FileSection, date: datetime.datetime):
         split = hunk.content.splitlines(keepends=True)
         init_line_count = len(split)
         if split:
@@ -488,10 +512,11 @@ class Ownership:
         else:
             pass
             # Empty file or binary file
-        self.changes = [LineMetadata(author, split[i]) for i in range(init_line_count)]
+        self.changes = [LineMetadata(author, split[i], date) for i in range(init_line_count)]
         self._line_count = init_line_count
 
-    def fix_length(self, hunk, split):
+    @staticmethod
+    def fix_length(hunk, split):
         has_newline = split[-1].endswith('\n')
         had_newline = hunk.content.endswith('\n')
         if not has_newline and hunk.change_end == len(split) and had_newline:

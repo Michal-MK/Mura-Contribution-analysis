@@ -12,6 +12,7 @@ PERCENT = '💯'
 TIME = '⏱'
 LAUNCH = '🚀'
 HOTSPOT = '🔥'
+CUBE = '🔲'
 
 CONTRIBUTOR = '👨‍💻'
 COMMIT = '⬆️'

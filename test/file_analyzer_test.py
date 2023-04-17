@@ -1,10 +1,15 @@
 import unittest
+import uuid
+from datetime import datetime
 from pathlib import Path
+from typing import Dict
 
 import git
 
-from file_analyzer import compute_syntactic_weight
-from history_analyzer import CommitRange
+from configuration import Configuration
+from file_analyzer import assign_scores, group_by_common_suffix, convert_file_groups
+from history_analyzer import CommitRange, Ownership
+from lib import FileGroup
 
 repos_path = "../repositories"
 single_commit = repos_path + "\\single_commit"
@@ -21,15 +26,6 @@ single_file = r'../repositories/single_file/NasModel.cs'
 
 
 class FileAnalyzerTest(unittest.TestCase):
-
-    def test_file_weight_single_file(self):
-        file_weight = compute_syntactic_weight(Path(single_file).absolute())
-        print(file_weight.average_line_weight)
-        print(file_weight.total_line_weight)
-        print(file_weight.maximum_achievable_line_weight)
-        #print(file_weight.semantic_weight)
-        #print(file_weight.syntactic_weight)
-        #print(file_weight.final_weight)
 
     def test_deletions(self):
         repo = git.Repo(deletions)
@@ -210,16 +206,124 @@ class FileAnalyzerTest(unittest.TestCase):
         self.assertTrue(file.changes[99].author == 'Michal-MK')
         self.assertTrue(file.changes[99].content == '}')
 
-
     def test_complex6(self):
-            repo = git.Repo(complex6)
-            c_range = CommitRange(repo, 'HEAD', 'ROOT')
-            result = c_range.analyze()
+        repo = git.Repo(complex6)
+        c_range = CommitRange(repo, 'HEAD', 'ROOT')
+        result = c_range.analyze()
 
-            file = list(result.values())[0]
+        file = list(result.values())[0]
 
-            pass
+        pass
 
+    def setUp(self) -> None:
+        self.groups = [
+            FileGroup('',
+                      [Path('AController.txt'), Path('BController.txt'), Path('CController.txt'), Path('DModel.txt'),
+                       Path('EModel.txt')])
+        ]
+
+        conv = convert_file_groups(self.groups)
+        res = group_by_common_suffix(conv)
+
+        grouped_files = {
+            'Controller': [Path('AController.txt'), Path('BController.txt'), Path('CController.txt')],
+            'Model': [Path('DModel.txt'), Path('EModel.txt')]
+        }
+
+        self.assertTrue(res == grouped_files)
+
+    def test_assign_scores_no_grace(self):
+        expected_result = {
+            Path('AController.txt'): 1.0,
+            Path('BController.txt'): 0.9,
+            Path('CController.txt'): 0.8,
+            Path('DModel.txt'): 1.0,
+            Path('EModel.txt'): 0.9
+        }
+
+        config = Configuration()
+        config.num_days_grace_period = 0
+
+        analysis: Dict[Path, Ownership] = {
+            Path('AController.txt'):
+                Ownership(Path('AController.txt'), 1, '\n' * 20, datetime(2022, 1, 1), uuid.uuid1().hex, 'Michal-MK'),
+            Path('BController.txt'):
+                Ownership(Path('BController.txt'), 1, '\n' * 20, datetime(2022, 1, 2), uuid.uuid1().hex, 'Michal-MK'),
+            Path('CController.txt'):
+                Ownership(Path('CController.txt'), 1, '\n' * 20, datetime(2022, 1, 3), uuid.uuid1().hex, 'Michal-MK'),
+            Path('DModel.txt'):
+                Ownership(Path('DModel.txt'), 1, '\n' * 20, datetime(2022, 1, 4), uuid.uuid1().hex, 'Michal-MK'),
+            Path('EModel.txt'):
+                Ownership(Path('EModel.txt'), 1, '\n' * 20, datetime(2022, 1, 5), uuid.uuid1().hex, 'Michal-MK')
+        }
+
+        result = assign_scores(self.groups, analysis, config)
+        self.assertTrue(result == expected_result, f'Expected {expected_result}, but got {result}')
+
+    def test_assign_scores_7_days(self):
+            expected_result = {
+                Path('AController.txt'): 1.0,
+                Path('BController.txt'): 1.0,
+                Path('CController.txt'): 0.8,
+                Path('DModel.txt'): 1.0,
+                Path('EModel.txt'): 0.9
+            }
+
+            config = Configuration()
+            config.num_days_grace_period = 7
+
+            analysis: Dict[Path, Ownership] = {
+                Path('AController.txt'):
+                    Ownership(Path('AController.txt'), 1, '\n' * 20, datetime(2022, 1, 1), uuid.uuid1().hex, 'Michal-MK'),
+                Path('BController.txt'):
+                    Ownership(Path('BController.txt'), 1, '\n' * 20, datetime(2022, 1, 6), uuid.uuid1().hex, 'Michal-MK'),
+                Path('CController.txt'):
+                    Ownership(Path('CController.txt'), 1, '\n' * 20, datetime(2022, 1, 20), uuid.uuid1().hex, 'Michal-MK'),
+                Path('DModel.txt'):
+                    Ownership(Path('DModel.txt'), 1, '\n' * 20, datetime(2022, 1, 4), uuid.uuid1().hex, 'Michal-MK'),
+                Path('EModel.txt'):
+                    Ownership(Path('EModel.txt'), 1, '\n' * 20, datetime(2022, 1, 20), uuid.uuid1().hex, 'Michal-MK')
+            }
+
+            result = assign_scores(self.groups, analysis, config)
+            self.assertTrue(result == expected_result, f'Expected {expected_result}, but got {result}')
+
+    def test_assign_scores_7_days_complex(self):
+            expected_result = {
+                Path('AController.txt'): 1.0,
+                Path('BController.txt'): 1.0,
+                Path('CController.txt'): 0.8,
+                Path('QController.txt'): 0.7,
+                Path('DModel.txt'): 1.0,
+                Path('EModel.txt'): 0.9,
+                Path('FModel.txt'): 0.9
+            }
+
+            self.groups[0].files.append(Path('QController.txt'))
+            self.groups[0].files.append(Path('FModel.txt'))
+
+            config = Configuration()
+            config.num_days_grace_period = 7
+
+            analysis: Dict[Path, Ownership] = {
+                Path('AController.txt'):
+                    Ownership(Path('AController.txt'), 1, '\n' * 20, datetime(2022, 1, 1), uuid.uuid1().hex, 'Michal-MK'),
+                Path('BController.txt'):
+                    Ownership(Path('BController.txt'), 1, '\n' * 20, datetime(2022, 1, 6), uuid.uuid1().hex, 'Michal-MK'),
+                Path('CController.txt'):
+                    Ownership(Path('CController.txt'), 1, '\n' * 20, datetime(2022, 1, 20), uuid.uuid1().hex, 'Michal-MK'),
+                Path('QController.txt'):
+                    Ownership(Path('CController.txt'), 1, '\n' * 20, datetime(2022, 1, 28), uuid.uuid1().hex, 'Michal-MK'),
+                Path('DModel.txt'):
+                    Ownership(Path('DModel.txt'), 1, '\n' * 20, datetime(2022, 1, 4), uuid.uuid1().hex, 'Michal-MK'),
+                Path('EModel.txt'):
+                    Ownership(Path('EModel.txt'), 1, '\n' * 20, datetime(2022, 1, 20), uuid.uuid1().hex, 'Michal-MK'),
+                Path('FModel.txt'):
+                    Ownership(Path('EModel.txt'), 1, '\n' * 20, datetime(2022, 1, 22), uuid.uuid1().hex, 'Michal-MK')
+            }
+
+            result = assign_scores(self.groups, analysis, config)
+            self.assertTrue(result == expected_result, f'Expected {expected_result}, but got {result}')
 
 
 if __name__ == '__main__':
