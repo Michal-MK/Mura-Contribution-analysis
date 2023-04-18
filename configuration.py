@@ -37,6 +37,7 @@ class Configuration:
         self.default_branch = "master"
         self._use_sonarqube = False
         self.sonarqube_persistent = True
+        self.remove_analysis_container_on_analysis_end = True
         self.sonarqube_port = 8085
         self.sonarqube_login = "admin"
         self.sonarqube_password = "admin"

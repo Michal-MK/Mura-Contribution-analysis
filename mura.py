@@ -7,8 +7,9 @@ from time import sleep
 from typing import Tuple, List, Dict, Optional, Any
 
 import docker
-import git
+from docker.models.containers import Container
 from git import Repo
+from gitlab import GitlabListError
 from matplotlib import pyplot as plt
 from matplotlib.dates import date2num, DateFormatter, drange
 from sonarqube import SonarQubeClient
@@ -270,12 +271,21 @@ def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, Li
     header(f"{VIOLATED_RULES} Violated Rules: ")
 
     rule_result = config.parsed_rules.matches_files(repo, ownership)
-    rule_result_remote = config.parsed_rules.matches_remote(contributors, remote_project)
+    rule_result_remote = {}
+    data_obtainable = True
+    try:
+        rule_result_remote = config.parsed_rules.matches_remote(contributors, remote_project)
+    except GitlabListError as e:
+        data_obtainable = False
+        print(f"{ERROR} Could not access remote repository. Error: {e.response_code} Message: '{e.error_message}'")
+        print(f"{INFO} No remote repository information will be presented.")
 
     if not rule_result and not rule_result_remote:
         print(f"{SUCCESS} No rules were violated.")
         return ret
 
+    if not rule_result:
+        print(f"{SUCCESS} No local rules were violated.")
     for c, file_rules in rule_result.items():
         rules_format = [('\t' + str(rule) + os.linesep) for rule in file_rules]
         print(f"{ERROR} Contributor {c} did not fulfill the following requirements:")
@@ -283,6 +293,11 @@ def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, Li
         for _ in file_rules:
             ret[c] *= config.file_rule_violation_multiplier
 
+    if not rule_result_remote:
+        if data_obtainable:
+            print(f"{SUCCESS} No remote rules were violated.")
+        else:
+            print(f"{WARN} No remote repository data to analyze.")
     for c, remote_rules in rule_result_remote.items():
         rules_format = [('\t' + str(rule) + os.linesep) for rule in remote_rules]
         print(f"{ERROR} Contributor {c} did not fulfill the following requirements:")
@@ -323,7 +338,7 @@ def local_syntax_analysis(config: Configuration, grouped_files: List[FileGroup])
     return ret
 
 
-def start_sonar_analysis(config: Configuration, repository_path: str) -> Optional[str]:
+def start_sonar_analysis(config: Configuration, repository_path: str) -> Optional[Tuple[str, Container]]:
     if not config.use_sonarqube:
         print(f"{INFO} Syntax analysis uses SonarQube and 'config.use_sonarqube = False'. Skipping syntax analysis.")
         return None
@@ -389,18 +404,18 @@ def start_sonar_analysis(config: Configuration, repository_path: str) -> Optiona
                                      f"-Dsonar.password={config.sonarqube_password} "
                                      f"-Dsonar.java.binaries=**/target"
                }
-        client.containers.run("sonarsource/sonar-scanner-cli:4.8",
-                              environment=env,
-                              volumes={repository_path: {'bind': '/usr/src', 'mode': 'rw'}},
-                              name="mura-sonarqube-scanner-instance",
-                              remove=True,
-                              network_mode='host',
-                              detach=True)
+        container = client.containers.run("sonarsource/sonar-scanner-cli:4.8",
+                                          environment=env,
+                                          volumes={repository_path: {'bind': '/usr/src', 'mode': 'rw'}},
+                                          name="mura-sonarqube-scanner-instance",
+                                          remove=config.remove_analysis_container_on_analysis_end,
+                                          network_mode='host',
+                                          detach=True)
     except Exception as e:
         print(f"{ERROR} Could not start SonarQube scanner. This is fatal.")
         raise e
 
-    return project_key
+    return project_key, container
 
 
 def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[ContributionDistribution]],
@@ -421,41 +436,42 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
     ret: ContributorWeight = defaultdict(lambda: 0.0)
     per_contributor = defaultdict(list)
 
-    for file, weight in local_syntax.items():
+    for file, file_weight_inst in local_syntax.items():
         if n_extreme_files > 0:
-            if weight.file_weight < lowest_weighted_files[highest_index][0]:
-                lowest_weighted_files[highest_index] = (weight.file_weight, file)
+            if file_weight_inst.file_weight < lowest_weighted_files[highest_index][0]:
+                lowest_weighted_files[highest_index] = (file_weight_inst.file_weight, file)
                 highest_index = lowest_weighted_files.index(max(lowest_weighted_files, key=lambda x: x[0]))
-            if weight.file_weight > highest_weighted_files[lowest_index][0]:
-                highest_weighted_files[lowest_index] = (weight.file_weight, file)
+            if file_weight_inst.file_weight > highest_weighted_files[lowest_index][0]:
+                highest_weighted_files[lowest_index] = (file_weight_inst.file_weight, file)
                 lowest_index = highest_weighted_files.index(min(highest_weighted_files, key=lambda x: x[0]))
 
         contributor = get_owner(ownership, file)
         mult_note = ""
         if file in file_maturity_score:
-            weight *= file_maturity_score[file]
+            file_weight_inst.file_weight *= file_maturity_score[file]
             mult_note = f" adjusted *({file_maturity_score[file]})"
-        print(f" - {file} -> {WEIGHT} Weight: {weight.file_weight}")
+        print(f" - {file} -> {WEIGHT} Weight: {file_weight_inst.syntactic_weight}" + mult_note)
         if not contributor:
             continue
-        per_contributor[contributor].append(weight)
-        ret[contributor] += weight.syntactic_weight
+        per_contributor[contributor].append(file_weight_inst.syntactic_weight)
+        ret[contributor] += file_weight_inst.syntactic_weight
 
     print()
     print("Averages:")
 
     for contrib, weights in per_contributor.items():
         print(f"{CONTRIBUTOR} {contrib.name} - {WEIGHT} Average weight: "
-              f"{sum(map(lambda x: x.file_weight, weights)) / len(weights)}")
+              f"{sum(weights) / len(weights)}")
 
     print()
     if n_extreme_files > 0:
-        print(f"{INFO} Largest files:")
+        print(f"{INFO} Highest weighted files:")
         for x in sorted(highest_weighted_files, key=lambda x: x[0], reverse=True):
             owner = get_owner(ownership, x[1])
             name = owner.name if owner is not None else "None"
             print(f" => {repo_p(str(x[1]), repo)} ({x[0]}) by {CONTRIBUTOR}: {name}")
-        print(f"{INFO} Smallest files:")
+
+        print(f"{INFO} Lowest weighted files:")
         for x in sorted(lowest_weighted_files, key=lambda x: x[0]):
             owner = get_owner(ownership, x[1])
             name = owner.name if owner is not None else "None"
@@ -466,7 +482,7 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
 
 def sonar_info(config: Configuration, contributors: List[Contributor], repo: Repo,
                file_ownership: Dict[Contributor, List[ContributionDistribution]],
-               project_key: str) -> ContributorWeight:
+               project_key: str, container: Container) -> ContributorWeight:
     header(f"{SYNTAX} Syntax + Semantics using SonarQube:")
 
     if not config.use_sonarqube:
@@ -487,6 +503,7 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
         except Exception as e:
             analysis_running = False
             print(f"{SUCCESS} SonarQube analysis finished.")
+            sleep(2)
             print()
 
     class IssueDef:
@@ -517,10 +534,15 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
 
     if len(all_issues) > 0:
         header(f"{HOTSPOT} Reported Issues:")
+    else:
+        print(f"{INFO} No issues reported by SonarQube. This is likely suspicious. Did the analysis container fail?")
+        print(f"{INFO} You can set 'config.remove_analysis_container_on_analysis_end = False' to debug the container.")
+        print(f"{INFO} Otherwise the project is perfect 'Great success! {SUCCESS}'.")
 
     for issue in all_issues:
         contributor = find_contributor(contributors, issue['author'])
-        issue_def = IssueDef(issue['severity'], issue['message'], issue['component'].split(':')[1], issue['line'])
+        line = issue['line'] if 'line' in issue else -1
+        issue_def = IssueDef(issue['severity'], issue['message'], issue['component'].split(':')[1], line)
         file_path = Path(repo_p(issue_def.file, repo))
         print(f"{WARN} Severity: {issue_def.severity} --> '{issue_def.message}")
         print(f" -> In file: {repo_p(str(file_path), repo)}:{issue_def.line}")
@@ -640,10 +662,15 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
 
     remote_weight_model = RemoteRepositoryWeightModel.load()
 
-    restricted_issues = [x for x in project.issues if x.created_at > start_date and x.created_at < end_date or
-                         x.closed_at is not None and x.closed_at > start_date and x.closed_at < end_date]
-    restricted_prs = [x for x in project.pull_requests if x.created_at > start_date and x.created_at < end_date or
-                      x.merged_at is not None and x.merged_at > start_date and x.merged_at < end_date]
+    try:
+        restricted_issues = [x for x in project.issues if x.created_at > start_date and x.created_at < end_date or
+                             x.closed_at is not None and x.closed_at > start_date and x.closed_at < end_date]
+        restricted_prs = [x for x in project.pull_requests if x.created_at > start_date and x.created_at < end_date or
+                          x.merged_at is not None and x.merged_at > start_date and x.merged_at < end_date]
+    except GitlabListError as e:
+        print(f"{ERROR} Could not access remote repository. Error: {e.response_code} Message: '{e.error_message}'")
+        print(f"{INFO} No remote repository information will be presented.")
+        return (project, {})
 
     print(f"Project: {project.name}")
     print(f"{ISSUES} Total issues: {len(restricted_issues)}")
@@ -922,7 +949,7 @@ def summary_info(contributors: List[Contributor],
 
         for contributor in contributors:
             if contributor in section:
-                print(f" -> {contributor.name}: {section[contributor]}")
+                print(f" -> {contributor.name}: {section[contributor]:.2f}")
                 if add:
                     sums[contributor] += section[contributor]
 
@@ -950,12 +977,12 @@ def summary_info(contributors: List[Contributor],
     print(f"{WEIGHT}{WARN} Weight multiplier for unfulfilled {RULES} Rules:")
     print_section(global_rule_weight_multiplier, add=False)
 
-    separator()
-    print(f"{WEIGHT}{WARN} Total multiplier for file history:")
-    print(f"{INFO} This multiplier is applied to: {SEMANTICS} Semantics and {SYNTAX} Syntax, "
-          f"the above results are WITH the multiplier.")
-    for path, multiplier in [x for x in file_history_multipliers.items() if x[1] != 1.0]:
-        print(f" -> {path}: {multiplier}")
+    # separator()
+    # print(f"{WEIGHT}{WARN} Total multiplier for file history:")
+    # print(f"{INFO} This multiplier is applied to: {SEMANTICS} Semantics and {SYNTAX} Syntax, "
+    #       f"the above results are WITH the multiplier.")
+    # for path, multiplier in [x for x in file_history_multipliers.items() if x[1] != 1.0]:
+    #     print(f" -> {path}: {multiplier}")
 
     separator()
     print(f"{WEIGHT} Total weight per contributor:")
@@ -974,7 +1001,8 @@ def summary_info(contributors: List[Contributor],
 def display_results() -> None:
     repository_path = r"C:\MUNI\last\Java\M1\airport-manager"
     project_key = ""
-    repo = git.Repo(repository_path)
+    container = Container()
+    repo = Repo(repository_path)
     commit_range = CommitRange(repo, "HEAD", "ROOT", verbose=False)
 
     config_path = Path("configuration_data/configuration.txt")
@@ -993,7 +1021,6 @@ def display_results() -> None:
     contributors = display_contributor_info(commit_range, config)
 
     percentage, ownership = percentage_info(history_analysis, contributors, config)
-    local_syntax_info(config, ownership, local_syntax, repo)
 
     contributors = display_contributor_info(commit_range, config)
     separator()
@@ -1007,7 +1034,7 @@ def display_results() -> None:
     separator()
     display_dir_tree(config, percentage, repo)
     separator()
-    sonar_weights = sonar_info(config, contributors, repo, ownership, project_key)
+    sonar_weights = sonar_info(config, contributors, repo, ownership, project_key, container)
     separator()
     local_syntax_weights = local_syntax_info(config, ownership, local_syntax, repo, scored_files)
     separator()

@@ -165,14 +165,13 @@ class CommitRange:
         assert isinstance(result, str)
         return result
 
-    def populate_previously_unseen_file(self, change: 'Change', commit_hash: str, file_name: str,
+    def populate_previously_unseen_file(self, change: 'Change', commit_hash: str, file_name: Path,
                                         ret: Dict[Path, 'Ownership'], commit_date: datetime.datetime) -> None:
-        file_path = posix_repo_p(file_name, self.repo)
-        pl_path = Path(file_path)
+        file_path = posix_repo_p(str(file_name), self.repo)
         # Obtain the previous version of the file as a base
         content = self.checkout_file_from(commit_hash, file_path)
-        ret[pl_path] = Ownership(pl_path, len(content.splitlines(keepends=True)), content, commit_date, commit_hash, change.author)
-        ret[pl_path].apply_change(change.hunks, commit_hash, self.repo, change.author, commit_date)
+        ret[file_name] = Ownership(file_name, len(content.splitlines(keepends=True)), content, commit_date, commit_hash, change.author)
+        ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author, commit_date)
 
     def analyze(self, verbose=False) -> AnalysisResult:
         """
@@ -200,7 +199,7 @@ class CommitRange:
                             ret[file_name].file = file_name
                             del ret[change.previous_name]
                         else:
-                            self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret, commit_date)
+                            self.populate_previously_unseen_file(change, commit_hash, file_name, ret, commit_date)
                         ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author, commit_date)
                     elif change.hunks and change.hunks[0].mode == 'A':
                         ret[file_name] = Ownership(file_name, change.hunks[0].change_end, change.hunks[0].content,
