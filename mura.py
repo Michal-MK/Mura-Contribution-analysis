@@ -416,7 +416,7 @@ def start_sonar_analysis(config: Configuration, repository_path: str) \
     #         commit_range.repo.git.execute(['git', 'checkout', '-b', 'sonar-analysis-head', commit_range.head])
     #     except GitCommandError:
     #         print("Could not create branch 'sonar-analysis-head' on current HEAD. "
-    #               "This likely means that the branch already exists and we are on it.")
+    #               "This likely means that the branch already exists; and we are on it.")
 
     # print(f"{INFO} Switched to branch 'sonar-analysis-head' on current HEAD.")
 
@@ -506,7 +506,7 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
 
 def sonar_info(config: Configuration, contributors: List[Contributor], repo: Repo,
                file_ownership: Dict[Contributor, List[ContributionDistribution]],
-               project_key: Optional[str], container: Optional[Container]) -> ContributorWeight:
+               project_key: Optional[str]) -> ContributorWeight:
     header(f"{SYNTAX} Syntax + Semantics using SonarQube:")
 
     if not config.use_sonarqube:
@@ -728,10 +728,10 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
     try:
         restricted_issues = [x for x in project.issues if start_date < x.created_at < end_date or
                              x.closed_at is not None and start_date < x.closed_at < end_date]
-        restricted_prs = [x for x in project.pull_requests if x.created_at > start_date and x.created_at < end_date or
-                          x.merged_at is not None and x.merged_at > start_date and x.merged_at < end_date]
-    except GitlabListError as e:
-        print(f"{ERROR} Could not access remote repository. Error: {e.response_code} Message: '{e.error_message}'")
+        restricted_prs = [x for x in project.pull_requests if start_date < x.created_at < end_date or
+                          x.merged_at is not None and start_date < x.merged_at < end_date]
+    except GitlabListError as ex:
+        print(f"{ERROR} Could not access remote repository. Error: {ex.response_code} Message: '{ex.error_message}'")
         print(f"{INFO} No remote repository information will be presented.")
         return project, {}
 
@@ -879,22 +879,22 @@ def lines_blanks_comments_info(repository: Repo,
             if element.children and n_extreme_files > 0:
                 if lines < smallest_files[largest_index][0]:
                     smallest_files[largest_index] = (lines, file)
-                    largest_index = smallest_files.index(max(smallest_files, key=lambda x: x[0]))
+                    largest_index = smallest_files.index(max(smallest_files, key=lambda k: k[0]))
                 if lines > largest_files[smallest_index][0]:
                     largest_files[smallest_index] = (lines, file)
-                    smallest_index = largest_files.index(min(largest_files, key=lambda x: x[0]))
+                    smallest_index = largest_files.index(min(largest_files, key=lambda k: k[0]))
             tracked_file_count += 1
 
     print(f"{INFO} Total lines: {total_lines} across {tracked_file_count} files.")
 
     if n_extreme_files > 0:
         print(f"{INFO} Largest files:")
-        for x in sorted(largest_files, key=lambda x: x[0], reverse=True):
+        for x in sorted(largest_files, key=lambda k: k[0], reverse=True):
             owner = get_owner(ownership, x[1])
             name = owner.name if owner is not None else "None"
             print(f" => {repo_p(str(x[1]), repository)} ({x[0]}) by {CONTRIBUTOR}: {name}")
         print(f"{INFO} Smallest files:")
-        for x in sorted(smallest_files, key=lambda x: x[0]):
+        for x in sorted(smallest_files, key=lambda k: k[0]):
             owner = get_owner(ownership, x[1])
             name = owner.name if owner is not None else "None"
             print(f" => {repo_p(str(x[1]), repository)} ({x[0]}) by {CONTRIBUTOR}: {name}")
@@ -1130,7 +1130,7 @@ def display_results(arguments: argparse.Namespace) -> None:
     separator()
     commit_range.unmerged_commits_info(repository, config, contributors)
     separator()
-    sonar_weights = sonar_info(config, contributors, repo, ownership, project_key, container)
+    sonar_weights = sonar_info(config, contributors, repo, ownership, project_key)
     separator()
     local_syntax_weights = local_syntax_info(config, ownership, syntactic_analysis_result, repo,
                                              file_history_multiplier)
