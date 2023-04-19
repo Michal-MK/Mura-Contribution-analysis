@@ -398,15 +398,25 @@ def start_sonar_analysis(config: Configuration, commit_range: CommitRange, repos
 
     print()
     print(f"{INFO} SonarQube 'sonar-scanner-cli' is performing analysis in the background...")
-    commit_range.repo.git.execute(['git', 'checkout', '-b', 'sonar-analysis-head', commit_range.head])
-    print(f"{INFO} Switched to branch 'sonar-analysis-head' on current HEAD.")
+    # try:
+    #     commit_range.repo.git.execute(['git', 'checkout', '-b', 'sonar-analysis-head', commit_range.head])
+    # except GitCommandError:
+    #     try:
+    #         commit_range.repo.git.execute(['git', 'branch', '-d', 'sonar-analysis-head'])
+    #         commit_range.repo.git.execute(['git', 'checkout', '-b', 'sonar-analysis-head', commit_range.head])
+    #     except GitCommandError:
+    #         print("Could not create branch 'sonar-analysis-head' on current HEAD. "
+    #               "This likely means that the branch already exists and we are on it.")
+
+    # print(f"{INFO} Switched to branch 'sonar-analysis-head' on current HEAD.")
+
     try:
         env = {"SONAR_HOST_URL": f"http://localhost:{config.sonarqube_port}",
                "SONAR_SCANNER_OPTS": f"-Dsonar.projectKey={project_key} "
                                      f"-Dsonar.login={config.sonarqube_login} "
                                      f"-Dsonar.password={config.sonarqube_password} "
-                                     f"-Dsonar.java.binaries=**/target "
-                                     f"-Dsonar.branch.name=sonar-analysis-head"
+                                     f"-Dsonar.java.binaries=**/target"
+               #                     f"-Dsonar.branch.name=sonar-analysis-head" TODO not available in standard edition
                }
         container = client.containers.run("sonarsource/sonar-scanner-cli:4.8",
                                           environment=env,
@@ -510,7 +520,6 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
             sleep(2)
             print()
 
-    repo.git.execute(["git", "branch", "-d", "sonar-analysis-head"])
 
     class IssueDef:
         def __init__(self, severity: str, message: str, file: str, line: int):
@@ -525,6 +534,46 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
             self.message = message
             self.file = file
             self.line = line
+
+    sonar_projects = sonar.projects.search_projects()
+    project = None
+    for proj in sonar_projects['components']:
+        if proj['key'] == project_key:
+            project = proj
+            break
+    if project is None:
+        print(f"{ERROR} Project {project_key} not found in SonarQube. Skipping analysis.")
+        print(f"{ERROR} Something went very wrong. Did the analysis container fail?")
+        return {}
+
+    counter = 0
+    while 'lastAnalysisDate' not in project and counter < 10:
+        sonar_projects = sonar.projects.search_projects()
+        for proj in sonar_projects['components']:
+            if proj['key'] == project_key:
+                project = proj
+                break
+        counter += 1
+        if 'lastAnalysisDate' not in project:
+            print(f"{INFO} Project {project_key} has no analysis. Waiting for Sonar to update its database...")
+        else:
+            date = datetime.strptime(project['lastAnalysisDate'], '%Y-%m-%dT%H:%M:%S%z')
+            if date < datetime.now() - timedelta(minutes=5):
+                if counter == 10:
+                    print(f"{ERROR} Project {project_key} has an old analysis. Database not updated in time.")
+                    print(f"{ERROR} Something went very wrong. Did the analysis container fail?")
+                    return {}
+                print(f"{INFO} Project {project_key} has an old analysis. Waiting for Sonar to update its database...")
+            else:
+                print(f"{SUCCESS} SonarQube database updated. Last analysis: {date}")
+                counter = 0
+                break
+
+    if counter == 10:
+        print(f"{ERROR} Project {project_key} not found in SonarQube. Skipping analysis.")
+        print(f"{ERROR} Something went very wrong. Did the analysis container fail?")
+        return {}
+
 
     issues_per_contributor: Dict[Contributor, List[IssueDef]] = defaultdict(list)
 
