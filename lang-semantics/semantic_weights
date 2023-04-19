@@ -22,7 +22,7 @@ length_upper_limit_multiplier = 0.5
 length_upper_limit = 1_000
 
 # Base weights for each lang construct.
-base_property_or_field_weight = 5
-base_function_weight = 10
-base_class_weight = 10
-base_length_weight = 50
+base_property_or_field_weight = 2
+base_function_weight = 4
+base_class_weight = 5
+base_length_weight = 10

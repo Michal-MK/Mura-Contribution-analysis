@@ -203,6 +203,21 @@ class GithubRepository(RemoteRepository):
         self.members_cache = [x.name if x.name is not None else "" for x in self.project.get_contributors()]
         return self.members_cache
 
+class DummyRepository(RemoteRepository):
+    def __init__(self):
+        super().__init__("", "")
+
+    @property
+    def issues(self) -> List[Issue]:
+        return []
+
+    @property
+    def pull_requests(self) -> List[PR]:
+        return []
+
+    @property
+    def members(self) -> List[str]:
+        return []
 
 def parse_project(project: str, gitlab_access_token: str, github_access_token: str) -> RemoteRepository:
     uri = urllib3.util.parse_url(project)

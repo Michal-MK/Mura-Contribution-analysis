@@ -24,7 +24,7 @@ from lib import FileGroup, Contributor, get_contributors, compute_file_ownership
     stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles, repo_p, \
     get_tracked_files
 from remote_repository_weight_model import RemoteRepositoryWeightModel
-from repository_hooks import parse_project, RemoteRepository, GithubRepository
+from repository_hooks import parse_project, RemoteRepository, DummyRepository
 from semantic_analysis import LangElement
 from semantic_weight_model import SemanticWeightModel
 
@@ -339,10 +339,10 @@ def local_syntax_analysis(config: Configuration, grouped_files: List[FileGroup])
 
 
 def start_sonar_analysis(config: Configuration, commit_range: CommitRange, repository_path: str) \
-        -> Optional[Tuple[str, Container]]:
+        -> Tuple[Optional[str], Optional[Container]]:
     if not config.use_sonarqube:
         print(f"{INFO} Syntax analysis uses SonarQube and 'config.use_sonarqube = False'. Skipping syntax analysis.")
-        return None
+        return None, None
 
     data_path, logs_path = start_sonar(config)
 
@@ -707,7 +707,7 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
 
     if config.ignore_remote_repo:
         print(f"{INFO} Skipping as 'config.ignore_remote_repo = True'")
-        return (GithubRepository("", ""), {})
+        return (DummyRepository(), {})
 
     start_date = commit_range.hist_commit.committed_datetime
     end_date = commit_range.head_commit.committed_datetime.replace(hour=23, minute=59, second=59, microsecond=999999)
