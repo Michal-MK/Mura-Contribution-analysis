@@ -8,14 +8,14 @@ from datetime import datetime, timezone, timedelta
 from time import sleep
 from typing import Tuple, List, Dict, Optional, Any
 
-import docker
-from docker.models.containers import Container
+import docker  # type: ignore
+from docker.models.containers import Container  # type: ignore
 from git import Repo
 from gitlab import GitlabListError
-from matplotlib import pyplot as plt
-from matplotlib.dates import date2num, DateFormatter, drange
-from sonarqube import SonarQubeClient
-from sonarqube.utils.exceptions import AuthError
+from matplotlib import pyplot as plt  # type: ignore
+from matplotlib.dates import date2num, DateFormatter, drange  # type: ignore
+from sonarqube import SonarQubeClient  # type: ignore
+from sonarqube.utils.exceptions import AuthError  # type: ignore
 
 import configuration
 import file_analyzer
@@ -24,8 +24,8 @@ from configuration import Configuration, start_sonar
 from file_analyzer import FileWeight
 from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
 from lib import FileGroup, Contributor, get_contributors, compute_file_ownership, find_contributor, \
-    stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles, repo_p, \
-    get_tracked_files
+    stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, \
+    FlaggedFiles, repo_p, get_tracked_files
 from remote_repository_weight_model import RemoteRepositoryWeightModel
 from repository_hooks import parse_project, RemoteRepository, DummyRepository
 from semantic_analysis import LangElement
@@ -62,8 +62,8 @@ def calculate_ownership(tree, ownership_cache=None):
     for value in tree.values():
         if isinstance(value, dict):
             sub_ownership = calculate_ownership(value, ownership_cache)
-            for owner, value in sub_ownership.items():
-                ownership[owner] += value
+            for owner, percentage_value in sub_ownership.items():
+                ownership[owner] += percentage_value
             count += 1
     for owner in ownership:
         ownership[owner] /= count
@@ -105,7 +105,7 @@ def print_tree(tree, level=0, prefix='', ownership_cache=None):
                 print_tree(value, level + 1, new_prefix, ownership_cache)
 
 
-def plot_commits(commits: List[str], commit_range: CommitRange, contributors: List[Contributor], repo: Repo,
+def plot_commits(commits: List[str], commit_range: CommitRange, contributors: List[Contributor],
                  force_x_axis_dense_labels=False, output_path: Optional[Path] = None) -> None:
     commit_data = defaultdict(list)
     min_date = datetime.max.replace(tzinfo=timezone.utc)
@@ -183,7 +183,7 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
         commit_distribution[contributor] += 1
         split = repo.commit(commit).message.splitlines()
         message = split[0] if len(split) > 0 else ''
-        print(f'Commit: {commit} - Msg: "{message}" by {CONTRIBUTOR} {contributor.name}')
+        print(f'Commit: {commit} - Msg: "{message}" by {CONTRIBUTOR} {contributor.name}')  # type: ignore
 
     print()
     header(f"{COMMIT} Commits per contributor:")
@@ -229,16 +229,16 @@ def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int,
         plt.show()
 
 
-def percentage_info(analysis_result: AnalysisResult, contributors: List[Contributor], config: Configuration) \
+def percentage_info(analysis_res: AnalysisResult, contributors: List[Contributor], config: Configuration, repo: Repo) \
         -> Tuple[Percentage, Dict[Contributor, List[ContributionDistribution]]]:
     header(f'{PERCENTAGE} Percentage of tracked files:')
 
-    percentage = calculate_percentage(contributors, analysis_result)
+    percentage = calculate_percentage(contributors, analysis_res)
 
     for contributor_name, percent in percentage.global_contribution.items():
         print(f'\t{contributor_name}: {percent:.2%}')
 
-    ownership = compute_file_ownership(percentage, config)
+    ownership = compute_file_ownership(percentage, config, repo)
 
     for contributor, contribution in ownership.items():
         print(f"Files owned by {CONTRIBUTOR} {contributor.name}")
@@ -249,7 +249,7 @@ def percentage_info(analysis_result: AnalysisResult, contributors: List[Contribu
     return percentage, ownership
 
 
-def display_dir_tree(config: Configuration, percentage: Percentage, repo: Repo):
+def display_dir_tree(percentage: Percentage, repo: Repo):
     header(f"{DIRECTORY_TREE} Dir Tree with ownership:")
 
     triples = []
@@ -285,9 +285,9 @@ def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, Li
     data_obtainable = True
     try:
         rule_result_remote = config.parsed_rules.matches_remote(contributors, remote_project)
-    except GitlabListError as e:
+    except GitlabListError as err:
         data_obtainable = False
-        print(f"{ERROR} Could not access remote repository. Error: {e.response_code} Message: '{e.error_message}'")
+        print(f"{ERROR} Could not access remote repository. Error: {err.response_code} Message: '{err.error_message}'")
         print(f"{INFO} No remote repository information will be presented.")
 
     if not rule_result and not rule_result_remote:
@@ -348,7 +348,7 @@ def local_syntax_analysis(config: Configuration, grouped_files: List[FileGroup])
     return ret
 
 
-def start_sonar_analysis(config: Configuration, commit_range: CommitRange, repository_path: str) \
+def start_sonar_analysis(config: Configuration, repository_path: str) \
         -> Tuple[Optional[str], Optional[Container]]:
     if not config.use_sonarqube:
         print(f"{INFO} Syntax analysis uses SonarQube and 'config.use_sonarqube = False'. Skipping syntax analysis.")
@@ -375,7 +375,7 @@ def start_sonar_analysis(config: Configuration, commit_range: CommitRange, repos
             print(f"{ERROR} Authentication failed. Please check your credentials. This is fatal.")
             print(f"{INFO} The defaults for new SonarQube instances are 'admin' for both username and password.")
             raise auth
-        except Exception as e:
+        except Exception:
             print(f"{INFO} The container is still starting... this can take a second. "
                   f"If this is the first run. This can take a while depending on your internet connection.")
             pass
@@ -435,9 +435,9 @@ def start_sonar_analysis(config: Configuration, commit_range: CommitRange, repos
                                           remove=config.remove_analysis_container_on_analysis_end,
                                           network_mode='host',
                                           detach=True)
-    except Exception as e:
+    except Exception as ex:
         print(f"{ERROR} Could not start SonarQube scanner. This is fatal.")
-        raise e
+        raise ex
 
     return project_key, container
 
@@ -464,10 +464,10 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
         if n_extreme_files > 0:
             if file_weight_inst.file_weight < lowest_weighted_files[highest_index][0]:
                 lowest_weighted_files[highest_index] = (file_weight_inst.file_weight, file)
-                highest_index = lowest_weighted_files.index(max(lowest_weighted_files, key=lambda x: x[0]))
+                highest_index = lowest_weighted_files.index(max(lowest_weighted_files, key=lambda k: k[0]))
             if file_weight_inst.file_weight > highest_weighted_files[lowest_index][0]:
                 highest_weighted_files[lowest_index] = (file_weight_inst.file_weight, file)
-                lowest_index = highest_weighted_files.index(min(highest_weighted_files, key=lambda x: x[0]))
+                lowest_index = highest_weighted_files.index(min(highest_weighted_files, key=lambda k: k[0]))
 
         contributor = get_owner(ownership, file)
         mult_note = ""
@@ -490,13 +490,13 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
     print()
     if n_extreme_files > 0:
         print(f"{INFO} Highest weighted files:")
-        for x in sorted(highest_weighted_files, key=lambda x: x[0], reverse=True):
+        for x in sorted(highest_weighted_files, key=lambda k: k[0], reverse=True):
             owner = get_owner(ownership, x[1])
             name = owner.name if owner is not None else "None"
             print(f" => {repo_p(str(x[1]), repo)} ({x[0]}) by {CONTRIBUTOR}: {name}")
 
         print(f"{INFO} Lowest weighted files:")
-        for x in sorted(lowest_weighted_files, key=lambda x: x[0]):
+        for x in sorted(lowest_weighted_files, key=lambda k: k[0]):
             owner = get_owner(ownership, x[1])
             name = owner.name if owner is not None else "None"
             print(f" => {repo_p(str(x[1]), repo)} ({x[0]}) by {CONTRIBUTOR}: {name}")
@@ -524,7 +524,7 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
             _ = client.containers.get("mura-sonarqube-scanner-instance")
             print(f"{INFO} Analysis is running. Waiting for it to finish...")
             sleep(2)
-        except Exception as e:
+        except Exception:
             analysis_running = False
             print(f"{SUCCESS} SonarQube analysis finished.")
             sleep(2)
@@ -715,7 +715,7 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
 
     if config.ignore_remote_repo:
         print(f"{INFO} Skipping as 'config.ignore_remote_repo = True'")
-        return (DummyRepository(), {})
+        return DummyRepository(), {}
 
     start_date = commit_range.hist_commit.committed_datetime
     end_date = commit_range.head_commit.committed_datetime.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -726,14 +726,14 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
     remote_weight_model = RemoteRepositoryWeightModel.load()
 
     try:
-        restricted_issues = [x for x in project.issues if x.created_at > start_date and x.created_at < end_date or
-                             x.closed_at is not None and x.closed_at > start_date and x.closed_at < end_date]
+        restricted_issues = [x for x in project.issues if start_date < x.created_at < end_date or
+                             x.closed_at is not None and start_date < x.closed_at < end_date]
         restricted_prs = [x for x in project.pull_requests if x.created_at > start_date and x.created_at < end_date or
                           x.merged_at is not None and x.merged_at > start_date and x.merged_at < end_date]
     except GitlabListError as e:
         print(f"{ERROR} Could not access remote repository. Error: {e.response_code} Message: '{e.error_message}'")
         print(f"{INFO} No remote repository information will be presented.")
-        return (project, {})
+        return project, {}
 
     print(f"Project: {project.name}")
     print(f"{ISSUES} Total issues: {len(restricted_issues)}")
@@ -852,7 +852,7 @@ def constructs_info(tracked_files: List[FileGroup],
 
 def lines_blanks_comments_info(repository: Repo,
                                ownership: Dict[Contributor, List[ContributionDistribution]],
-                               semantic_analysis: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
+                               semantic_analysis_res: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
                                tracked_files: List[FileGroup],
                                n_extreme_files: int = 5):
     header(f"{BLANKS_COMMENTS} Blanks and comments:")
@@ -871,7 +871,7 @@ def lines_blanks_comments_info(repository: Repo,
         file_group = tracked_files[i]
         for j in range(len(file_group.files)):
             file = file_group.files[j]
-            element = semantic_analysis[i][j][2]
+            element = semantic_analysis_res[i][j][2]
             # print(f"{INFO} File: {file.name}")
             lines = element.end
             # print(f"{INFO} Lines: {lines}")
@@ -907,12 +907,11 @@ def lines_blanks_comments_info(repository: Repo,
     for i in range(len(tracked_files)):
         file_group = tracked_files[i]
         for j in range(len(file_group.files)):
-            file = file_group.files[j]
-            element = semantic_analysis[i][j][2]
+            element = semantic_analysis_res[i][j][2]
             # print(f"{INFO} File: {file.name}")
             comments = get_all_comments(element)
             # print(f"{INFO} Comments: {len(comments)}")
-            file_comments = sum(map(lambda x: x.end - x.start, comments))
+            file_comments = sum(map(lambda k: k.end - k.start, comments))
             total_comments += file_comments
             file_count += 1 if file_comments > 0 else 0
             # print(f"{INFO} Lines length: {file_comments}")
@@ -929,17 +928,17 @@ def estimate_hours(dates: List[datetime], max_commit_diff: int = 120, first_comm
         return 0
 
     # Oldest commit first, newest last
-    sortedDates = sorted(dates)
-    allButLast = sortedDates[:-1]
+    sorted_dates = sorted(dates)
+    all_but_last = sorted_dates[:-1]
 
     hours = 0.0
-    for index, date in enumerate(allButLast):
-        nextDate = sortedDates[index + 1]
-        diffInMinutes = (nextDate - date).total_seconds() / 60
+    for index, date in enumerate(all_but_last):
+        next_date = sorted_dates[index + 1]
+        diff_in_minutes = (next_date - date).total_seconds() / 60
 
         # Check if commits are counted to be in same coding session
-        if diffInMinutes < max_commit_diff:
-            hours += (diffInMinutes / 60)
+        if diff_in_minutes < max_commit_diff:
+            hours += (diff_in_minutes / 60)
         else:
             # The date difference is too big to be inside single coding session
             # The work of first commit of a session cannot be seen in git history,
@@ -976,19 +975,19 @@ def hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Co
     return ret
 
 
-def gaussian(configuration: Configuration, input_hours: float, hour_estimate: float):
-    return configuration.base_hour_match_weight * \
+def gaussian(config: Configuration, input_hours: float, hour_estimate: float):
+    return config.base_hour_match_weight * \
         math.exp(-((input_hours - hour_estimate) ** 2) / (2 * hour_estimate * 2 ** 2))
 
 
-def gaussian_weights(configuration: Configuration, hour_estimate: float,
+def gaussian_weights(config: Configuration, hour_estimate: float,
                      hours: Dict[Contributor, Tuple[int, int]]) -> ContributorWeight:
     ret: Dict[Contributor, float] = defaultdict(lambda: 0.0)
     header(f"{WEIGHT} Gaussian weights:")
     for contributor, commits_hours in hours.items():
         print(f"{CONTRIBUTOR} {contributor.name}:")
         if commits_hours[1] != 0:
-            weight = gaussian(configuration, hour_estimate, commits_hours[1])
+            weight = gaussian(config, hour_estimate, commits_hours[1])
             print(f" => {weight:.2f} {WEIGHT} Weight gained for: {commits_hours[1]} hours of work.")
             ret[contributor] += weight
         else:
@@ -1012,11 +1011,11 @@ def summary_info(contributors: List[Contributor],
             print(f'{INFO} Nothing to show here...')
             return
 
-        for contributor in contributors:
-            if contributor in section:
-                print(f" -> {contributor.name}: {section[contributor]:.2f}")
+        for contrib in contributors:
+            if contrib in section:
+                print(f" -> {contrib.name}: {section[contrib]:.2f}")
                 if add:
-                    sums[contributor] += section[contributor]
+                    sums[contrib] += section[contrib]
 
     separator()
     print(f"{WEIGHT} Total weight per contributor for {CUBE} SonarQube analysis:")
@@ -1064,6 +1063,7 @@ def summary_info(contributors: List[Contributor],
         print(f"{char} -> {model[0].name}: {model[1]:.2f}")
         position += 1
 
+
 # https://stackoverflow.com/a/8384788
 def path_leaf(path):
     import ntpath
@@ -1071,41 +1071,38 @@ def path_leaf(path):
     return tail or ntpath.basename(head)
 
 
-def display_results(args: argparse.Namespace) -> None:
+def display_results(arguments: argparse.Namespace) -> None:
     import fs_access as file_system
 
-    project_key: Optional[str] = None
-    container = Container()
-
-    repository_path = args.repo
+    repository_path = arguments.repo
 
     repo = Repo(repository_path)
-    commit_range = CommitRange(repo, args.head, args.root, verbose=True)
+    commit_range = CommitRange(repo, arguments.head, arguments.root, verbose=True)
 
     config = configuration.validate()
 
-    config.ignore_remote_repo = args.ignore_remote_repo
-    config.use_sonarqube = args.use_sonarqube
-    config.sonarqube_persistent = args.sq_persistent
-    config.remove_analysis_container_on_analysis_end = args.sq_remove_analysis_container_on_analysis_end
-    config.sonarqube_login = args.sq_login
-    config.sonarqube_password = args.sq_password
-    config.sonarqube_port = args.sq_port
+    config.ignore_remote_repo = arguments.ignore_remote_repo
+    config.use_sonarqube = arguments.use_sonarqube
+    config.sonarqube_persistent = arguments.sq_persistent
+    config.remove_analysis_container_on_analysis_end = arguments.sq_remove_analysis_container_on_analysis_end
+    config.sonarqube_login = arguments.sq_login
+    config.sonarqube_password = arguments.sq_password
+    config.sonarqube_port = arguments.sq_port
 
-    config.check_whitespace_changes = args.check_whitespace_changes
-    config.ignored_extensions = args.ignored_extensions
+    config.check_whitespace_changes = arguments.check_whitespace_changes
+    config.ignored_extensions = arguments.ignored_extensions
 
     config.post_validate()
 
-    config.contributor_map = args.contributor_map
+    config.contributor_map = arguments.contributor_map
 
     repository = file_system.validate_repository(repository_path, config)
 
-    config.anonymous_mode = args.anonymous_mode
+    config.anonymous_mode = arguments.anonymous_mode
 
     contributors = display_contributor_info(commit_range, config)
 
-    project_key, container = start_sonar_analysis(config, commit_range, repository_path)
+    project_key, container = start_sonar_analysis(config, repository_path)
 
     tracked_files = get_tracked_files(repository, verbose=True)
     history_analysis_result = commit_range.analyze(verbose=True)
@@ -1118,14 +1115,14 @@ def display_results(args: argparse.Namespace) -> None:
     commit_distribution, insertions_deletions = commit_info(commit_range, repo, contributors)
     insertions_deletions_info(insertions_deletions, Path(repository_path) / "ins_del.png")
     separator()
-    plot_commits([x for x in commit_range][1:], commit_range, contributors, repo,
+    plot_commits([x for x in commit_range][1:], commit_range, contributors,
                  output_path=Path(repository_path) / "commits.png")
     separator()
-    flagged_files = file_statistics_info(commit_range, contributors)
+    _ = file_statistics_info(commit_range, contributors)
     separator()
-    percentage, ownership = percentage_info(history_analysis_result, contributors, config)
+    percentage, ownership = percentage_info(history_analysis_result, contributors, config, repo)
     separator()
-    display_dir_tree(config, percentage, repo)
+    display_dir_tree(percentage, repo)
     separator()
 
     lines_blanks_comments_info(repository, ownership, semantic_analysis_grouped_result, tracked_files,
@@ -1145,7 +1142,7 @@ def display_results(args: argparse.Namespace) -> None:
     separator()
     hours = hour_estimates(contributors, repository)
 
-    hour_weights = gaussian_weights(config, args.hour_estimate_per_contributor, hours)
+    hour_weights = gaussian_weights(config, arguments.hour_estimate_per_contributor, hours)
     separator()
     project, repo_management_weights = remote_info(commit_range, repo, config, contributors)
     separator()

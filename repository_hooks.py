@@ -256,7 +256,8 @@ if __name__ == '__main__':
                     state=issue.state,
                     closed_by=issue.closed_by.login if issue.closed_by is not None else '',
                     author=issue.user.login,
-                    assigned_to=issue.assignee.login if issue.assignee is not None else '')
+                    assigned_to=issue.assignee.login if issue.assignee is not None else '',
+                    url=issue.html_url)
         print(iss)
     prs = repo.get_pulls()
     for pr in prs:
@@ -270,7 +271,8 @@ if __name__ == '__main__':
                   commit_shas=[c.sha for c in pr.get_commits()],
                   reviewers=[r.login for r in pr.get_review_requests()[0]],
                   target_branch=pr.base.ref,
-                  source_branch=pr.head.ref)
+                  source_branch=pr.head.ref,
+                  url=pr.html_url)
         print(preq)
         print(pr)
     members = repo.get_contributors()

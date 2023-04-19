@@ -102,6 +102,8 @@ def get_flagged_files_by_contributor(commit_range: CommitRange, contributors: Li
             result[name] = FlaggedFiles()
         flagged_files = get_files_with_flags(commit)
         for flag, (count, paths) in flagged_files.items():
+            assert isinstance(count, int), f"Count is not an int: {count}, this is very much not expected... How?"
+            assert isinstance(paths, list), f"Paths is not a list: {paths}, this is very much not expected... How?"
             result[name].update(flag, count, paths)
     return result
 
@@ -202,14 +204,14 @@ def filter_related_groups(groups: List[FileGroup]) -> List[FileGroup]:
 def posix_repo_p(file_name: str, repo: Repo) -> str:
     repo_dir = repo.working_dir
     assert repo_dir is not None
-    if file_name.startswith(repo_dir):
+    if file_name.startswith(str(repo_dir)):
         return Path(os.path.relpath(file_name, repo_dir)).as_posix()
     return (Path(repo_dir) / file_name).resolve().as_posix()
 
 def repo_p(file_name: str, repo: Repo) -> Path:
     repo_dir = repo.working_dir
     assert repo_dir is not None
-    if file_name.startswith(repo_dir):
+    if file_name.startswith(str(repo_dir)):
         return Path(os.path.relpath(file_name, repo_dir))
     return Path((Path(repo_dir) / file_name).resolve())
 
@@ -322,25 +324,28 @@ def find_contributor(contributors: List[Contributor], author: str) -> Optional[C
 
 
 class ContributionDistribution:
-    def __init__(self, file: Path, percentage: float):
+    def __init__(self, file: Path, percentage: float, repo: Optional[Repo] = None):
         self.file = file
         self.percentage = percentage
+        self.repo = repo
 
     def __iter__(self):
         yield self.file
         yield self.percentage
 
     def __str__(self):
-        return f"{self.file} ({self.percentage})"
+        if self.repo is None:
+            return f"{self.file} ({self.percentage})"
+        return f"{repo_p(str(self.file), self.repo)} ({self.percentage})"
 
 
-def compute_file_ownership(percentage: Percentage, config: Configuration) \
+def compute_file_ownership(percentage: Percentage, config: Configuration, repo: Repo) \
         -> Dict[Contributor, List[ContributionDistribution]]:
     ret: Dict[Contributor, List[ContributionDistribution]] = defaultdict(list)
     for file, percentages in percentage.file_per_contributor.items():
         for contributor, contrib_percent in percentages:
             if contrib_percent > config.full_ownership_min_threshold:
-                ret[contributor].append(ContributionDistribution(file, 1))
+                ret[contributor].append(ContributionDistribution(file, 1, repo))
             # elif contrib_percent < config.ownership_min_threshold:
             #     continue
             # else:
