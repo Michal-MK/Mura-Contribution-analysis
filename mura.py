@@ -1,7 +1,9 @@
+import argparse
 import math
 import os
 import sys
 import uuid
+from contextlib import redirect_stdout
 from datetime import datetime, timezone, timedelta
 from time import sleep
 from typing import Tuple, List, Dict, Optional, Any
@@ -15,6 +17,7 @@ from matplotlib.dates import date2num, DateFormatter, drange
 from sonarqube import SonarQubeClient
 from sonarqube.utils.exceptions import AuthError
 
+import configuration
 import file_analyzer
 import semantic_analysis
 from configuration import Configuration, start_sonar
@@ -103,7 +106,7 @@ def print_tree(tree, level=0, prefix='', ownership_cache=None):
 
 
 def plot_commits(commits: List[str], commit_range: CommitRange, contributors: List[Contributor], repo: Repo,
-                 force_x_axis_dense_labels=False) -> None:
+                 force_x_axis_dense_labels=False, output_path: Optional[Path] = None) -> None:
     commit_data = defaultdict(list)
     min_date = datetime.max.replace(tzinfo=timezone.utc)
     max_date = datetime.min.replace(tzinfo=timezone.utc)
@@ -136,7 +139,10 @@ def plot_commits(commits: List[str], commit_range: CommitRange, contributors: Li
         print(f"{INFO} Skipping x-axis labels for all {len(dates)} dates to avoid cluttering the x-axis.")
         print(f" - Set force_x_axis_labels to True to override this behavior.")
 
-    plt.show()
+    if output_path is not None:
+        plt.savefig(output_path)
+    else:
+        plt.show()
 
 
 def separator() -> None:
@@ -195,7 +201,8 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
     return commit_distribution, insertions_deletions
 
 
-def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int, int]]) -> None:
+def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int, int]],
+                              file_output: Optional[Path] = None) -> Any:
     insertions_deletions.sort(key=lambda x: x[1], reverse=True)
 
     contributor_names = [x[0].name for x in insertions_deletions]
@@ -216,7 +223,10 @@ def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int,
 
     fig.subplots_adjust(wspace=0.5)
 
-    plt.show()
+    if file_output is not None:
+        plt.savefig(file_output)
+    else:
+        plt.show()
 
 
 def percentage_info(analysis_result: AnalysisResult, contributors: List[Contributor], config: Configuration) \
@@ -496,7 +506,7 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
 
 def sonar_info(config: Configuration, contributors: List[Contributor], repo: Repo,
                file_ownership: Dict[Contributor, List[ContributionDistribution]],
-               project_key: str, container: Container) -> ContributorWeight:
+               project_key: Optional[str], container: Optional[Container]) -> ContributorWeight:
     header(f"{SYNTAX} Syntax + Semantics using SonarQube:")
 
     if not config.use_sonarqube:
@@ -519,7 +529,6 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
             print(f"{SUCCESS} SonarQube analysis finished.")
             sleep(2)
             print()
-
 
     class IssueDef:
         def __init__(self, severity: str, message: str, file: str, line: int):
@@ -573,7 +582,6 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
         print(f"{ERROR} Project {project_key} not found in SonarQube. Skipping analysis.")
         print(f"{ERROR} Something went very wrong. Did the analysis container fail?")
         return {}
-
 
     issues_per_contributor: Dict[Contributor, List[IssueDef]] = defaultdict(list)
 
@@ -1056,56 +1064,152 @@ def summary_info(contributors: List[Contributor],
         print(f"{char} -> {model[0].name}: {model[1]:.2f}")
         position += 1
 
+# https://stackoverflow.com/a/8384788
+def path_leaf(path):
+    import ntpath
+    head, tail = ntpath.split(path)
+    return tail or ntpath.basename(head)
 
-def display_results() -> None:
-    repository_path = r"C:\MUNI\last\Java\M1\airport-manager"
-    project_key = ""
+
+def display_results(args: argparse.Namespace) -> None:
+    import fs_access as file_system
+
+    project_key: Optional[str] = None
     container = Container()
+
+    repository_path = args.repo
+
     repo = Repo(repository_path)
-    commit_range = CommitRange(repo, "HEAD", "ROOT", verbose=False)
+    commit_range = CommitRange(repo, args.head, args.root, verbose=True)
 
-    config_path = Path("configuration_data/configuration.txt")
-    rules_path = Path("configuration_data/rules.txt")
-    config = Configuration.load_from_file(config_path, rules_path, verbose=False)
+    config = configuration.validate()
 
-    tracked_files = get_tracked_files(repo, verbose=True)
+    config.ignore_remote_repo = args.ignore_remote_repo
+    config.use_sonarqube = args.use_sonarqube
+    config.sonarqube_persistent = args.sq_persistent
+    config.remove_analysis_container_on_analysis_end = args.sq_remove_analysis_container_on_analysis_end
+    config.sonarqube_login = args.sq_login
+    config.sonarqube_password = args.sq_password
+    config.sonarqube_port = args.sq_port
 
-    history_analysis = commit_range.analyze()
-    scored_files = file_analyzer.assign_scores(tracked_files, history_analysis, config)
+    config.check_whitespace_changes = args.check_whitespace_changes
+    config.ignored_extensions = args.ignored_extensions
 
-    local_syntax = local_syntax_analysis(config, tracked_files)
-    semantics = semantic_analysis.compute_semantic_weight_result(config, tracked_files)
+    config.post_validate()
+
+    config.contributor_map = args.contributor_map
+
+    repository = file_system.validate_repository(repository_path, config)
+
+    config.anonymous_mode = args.anonymous_mode
+
     contributors = display_contributor_info(commit_range, config)
 
-    percentage, ownership = percentage_info(history_analysis, contributors, config)
+    project_key, container = start_sonar_analysis(config, commit_range, repository_path)
 
-    contributors = display_contributor_info(commit_range, config)
+    tracked_files = get_tracked_files(repository, verbose=True)
+    history_analysis_result = commit_range.analyze(verbose=True)
+    syntactic_analysis_result = local_syntax_analysis(config, tracked_files)
+    file_history_multiplier = file_analyzer.assign_scores(tracked_files, history_analysis_result, config)
+
+    semantic_analysis_grouped_result = semantic_analysis.compute_semantic_weight_result(config, tracked_files,
+                                                                                        verbose=True)
     separator()
     commit_distribution, insertions_deletions = commit_info(commit_range, repo, contributors)
+    insertions_deletions_info(insertions_deletions, Path(repository_path) / "ins_del.png")
     separator()
-    plot_commits([x for x in commit_range][1:], commit_range, contributors, repo)
+    plot_commits([x for x in commit_range][1:], commit_range, contributors, repo,
+                 output_path=Path(repository_path) / "commits.png")
     separator()
-    file_flags = file_statistics_info(commit_range, contributors)
+    flagged_files = file_statistics_info(commit_range, contributors)
     separator()
-    percentage, ownership = percentage_info(history_analysis, contributors, config)
+    percentage, ownership = percentage_info(history_analysis_result, contributors, config)
     separator()
     display_dir_tree(config, percentage, repo)
     separator()
+
+    lines_blanks_comments_info(repository, ownership, semantic_analysis_grouped_result, tracked_files,
+                               n_extreme_files=5)
+    separator()
+    commit_range.unmerged_commits_info(repository, config, contributors)
+    separator()
     sonar_weights = sonar_info(config, contributors, repo, ownership, project_key, container)
     separator()
-    local_syntax_weights = local_syntax_info(config, ownership, local_syntax, repo, scored_files)
+    local_syntax_weights = local_syntax_info(config, ownership, syntactic_analysis_result, repo,
+                                             file_history_multiplier)
     separator()
-    semantic_weights = semantic_info(tracked_files, ownership, semantics, scored_files)
+    semantic_weights = semantic_info(tracked_files, ownership, semantic_analysis_grouped_result,
+                                     file_history_multiplier)
+    separator()
+    constructs_info(tracked_files, ownership, semantic_analysis_grouped_result)
+    separator()
+    hours = hour_estimates(contributors, repository)
+
+    hour_weights = gaussian_weights(config, args.hour_estimate_per_contributor, hours)
     separator()
     project, repo_management_weights = remote_info(commit_range, repo, config, contributors)
     separator()
     global_rule_weight_multiplier = rule_info(config, repo, ownership, contributors, project)
     separator()
-    hours = gaussian_weights(config, config.hour_estimate, hour_estimates(contributors, repo))
-    separator()
     summary_info(contributors, sonar_weights, semantic_weights, local_syntax_weights, repo_management_weights,
-                 global_rule_weight_multiplier, hours, scored_files)
+                 global_rule_weight_multiplier, hour_weights, file_history_multiplier)
+
+
+def contributor_pairs(contributor_map):
+    key, value = contributor_map.split(':')
+    return key, value
 
 
 if __name__ == '__main__':
-    display_results()
+    parser = argparse.ArgumentParser(description='MURA - MOTH | Repository Analyzer')
+    parser.add_argument('-r', '--repo', type=str, required=True,
+                        help='A string representing a path to a repository')
+    parser.add_argument('--head', type=str, default='HEAD', metavar="HEXSHA",
+                        help='The head commit - representing the final commit that will be analyzed')
+    parser.add_argument('--root', type=str, default='ROOT', metavar="HEXSHA",
+                        help='The root commit - representing the starting point in history')
+    parser.add_argument('-f', '--file', type=str, default='', metavar="PATH",
+                        help='Where to store the output of this script, default prints to stdout')
+    parser.add_argument('--contributor-map', type=contributor_pairs, nargs='*', action='append', default=[],
+                        metavar='"C":"C"',
+                        help='A variable number of "contributor_name":"contributor_name" type inputs')
+    parser.add_argument('--hour_estimate_per_contributor', type=int, default=24, metavar='N',
+                        help='The expected amount of hours students are expected to spend on the project '
+                             '(for the given commit range), used for hour weight estimation.')
+    parser.add_argument('--anonymous-mode', type=bool, default=False, metavar="BOOL",
+                        help='Anonymous mode, All contributor names will be replaced with "Contributor #n"')
+    parser.add_argument('--use-sonarqube', type=bool, default=True, metavar="BOOL",
+                        help='Use SonarQube')
+    parser.add_argument('--sq-persistent', type=bool, default=True, metavar="BOOL",
+                        help='SonarQube persistent')
+    parser.add_argument('--sq-remove-analysis-container-on-analysis-end', type=bool, default=True, metavar="BOOL",
+                        help='Remove analysis container on analysis end')
+    parser.add_argument('--sq-login', type=str, default='admin', metavar="STR",
+                        help='SonarQube login')
+    parser.add_argument('--sq-password', type=str, default='admin', metavar="STR",
+                        help='SonarQube password')
+    parser.add_argument('--sq-port', type=int, default=8080, metavar="PORT",
+                        help='SonarQube port')
+    parser.add_argument('--check-whitespace-changes', type=bool, default=True, metavar="BOOL",
+                        help='Check for whitespace changes in the file')
+    parser.add_argument('--ignored-extensions', type=str, nargs='+', default=[], metavar="EXT",
+                        help='Extensions to ignore during analysis')
+    parser.add_argument('--ignore-remote-repo', type=bool, default=False, metavar="BOOL",
+                        help='Ignore remote repository, in case of no internet connection or other reasons')
+
+    args = parser.parse_args()
+
+    if args.file != '':
+        try:
+            with open(args.file, 'w', encoding='UTF-8') as f:
+                with redirect_stdout(f):
+                    try:
+                        display_results(args)
+                    except Exception as inner:
+                        header("")
+                        print(f"{ERROR} MURA failed to run, please check the following error:")
+                        print(inner)
+        except Exception as e:
+            print(e)
+            print(f"Failed to write to file: '{args.file}'")
+            sys.exit(1)

@@ -145,8 +145,8 @@ def list_semantic_analyzers():
 
 
 def validate() -> 'Configuration':
-    config_path = Path("configuration_data/configuration.txt")
-    rules_path = Path("configuration_data/rules.txt")
+    config_path = Path(__file__).parent / "configuration_data" / "configuration.txt"
+    rules_path = Path(__file__).parent / "configuration_data" / "rules.txt"
 
     if not config_path.exists():
         raise FileNotFoundError(f"{ERROR} Path {config_path} does not exist!")
