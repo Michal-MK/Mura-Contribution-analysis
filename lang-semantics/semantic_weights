@@ -1,21 +1,27 @@
+# If a class has < 4 properties or fields, it's weight is multiplied by 0.8, equally for upper limit.
 property_field_lower_limit_multiplier = 0.8
 property_field_lower_limit = 4
 property_field_upper_limit_multiplier = 0.5
 property_field_upper_limit = 20
 
+# If a class has < 4 functions, it's weight is multiplied by 0.8, equally for upper limit.
+# Data classes are NOT excluded from this rule. But they are less common. And can be generated easily.
 function_lower_limit_multiplier = 0.8
 function_lower_limit = 4
 function_upper_limit_multiplier = 0.5
 function_upper_limit = 15
 
+# Only class_upper_limit per file, more than that is multiplied.
 class_upper_limit_multiplier = 0.5
 class_upper_limit = 1
 
+# Too small or too large files are multiplied, to promote reasonably sized files.
 length_lower_limit_multiplier = 0.8
 length_lower_limit = 50
 length_upper_limit_multiplier = 0.5
 length_upper_limit = 1_000
 
+# Base weights for each lang construct.
 base_property_or_field_weight = 5
 base_function_weight = 10
 base_class_weight = 10

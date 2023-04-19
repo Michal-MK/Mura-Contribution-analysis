@@ -4,6 +4,8 @@ import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Union, List, Optional, Set, Dict, Tuple, DefaultDict, Any, TYPE_CHECKING
+from unidecode import unidecode
+
 
 from git import Repo, Commit, Actor
 
@@ -292,6 +294,7 @@ def get_contributors(config: 'Configuration', commit_range: CommitRange, match_o
                         break
 
         if not matched:
+            it.aliases.append(Contributor(unidecode(it.name), it.email))
             matched_contributors.append(it)
 
     if config.anonymous_mode:

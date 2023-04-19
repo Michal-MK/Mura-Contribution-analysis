@@ -6,3 +6,4 @@ matplotlib
 notebook
 python-sonarqube-api
 docker
+Unidecode

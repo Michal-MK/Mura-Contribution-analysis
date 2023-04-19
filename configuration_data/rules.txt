@@ -4,6 +4,7 @@
 # <directory> is the directory to look in, standard wildcards are supported for directories.
 # <file> is the file to look for, standard wildcards are supported for files.
 # <amount> is the expected number of matches the contributor should have.
+# <constraint> is an optional constraint, if the constraint is not met, the rule is ignored. Currently not implemented!
 * "*/" ".*Controller.*\.java" >=1
 * "*/" ".*Test.*\.java" >=1 | $DIR_TREE=="*/src/test/java" && $OWN(*/src/) != $OWNER
 * "*/" "pom\.xml" >=1

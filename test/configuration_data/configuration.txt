@@ -1,22 +1,45 @@
+# The minimum percentage of lines owned in a file to be considered a full owner
 full_ownership_min_threshold = 0.8
+# The minimum percentage of lines owned in a file to be considered a partial owner, currently not used!
 ownership_min_threshold = 0.2
-complete_file_threshold = 0.8
+
+# The relative difference for which a file is considered completed.
+# Assume a file with 50 lines, a new version of the file is committed with 60 lines.
+# The relative difference is 10/50 = 0.2, which is above the threshold of 0.2, so current revision is not complete.
+# The new revision may be complete if no other revision significantly changes the file.
+complete_file_threshold = 0.15
+
+# When a file with common suffix is committed to the repository, it is considered a new file.
+# When subsequent files of the same suffix are added, their weight is multiplied by 1 - 0.1 * {number_of_files}
+# This grace period enables files to retain their full value for 'n' days after the initial file is committed.
 num_days_grace_period = 7
+
+# Rule violation multipliers are applied as the final step. And are multiplicatively stacked on top of each other.
+# Violating two file rules results in 0.81 multiplier etc...
 file_rule_violation_multiplier = 0.9
 issue_rule_violation_multiplier = 0.98
 pr_rule_violation_multiplier = 0.9
 
+# The base weight of a file in the repository.
 single_file_weight = 5.0
+
+# The maximum expected length of a line.
 max_line_length = 120
+# If the length is exceeded, the base file weight is replaced by the following value.
 over_max_line_length_weight = -10
 
+# For hour estimation, this value is the peak of a gaussian curve.
 base_hour_match_weight = 200.0
+# Expected time spent on the project by a contributor. Meaning each contributor is expected to spend 1 hour per day.
+# For a project lasting 24 days.
 hour_estimate = 24.0
 
+# Weights assigned to each severity level of a sonar reported issue.
 sonar_blocker_severity_weight = -50.0
 sonar_critical_severity_weight = -10.0
 sonar_major_severity_weight = -5.0
 sonar_minor_severity_weight = -1.0
 
+# Weights assigned to each type of sonar security hotspot.
 sonar_security_hotspot_high_weight = 0.0
 sonar_security_hotspot_low_weight = 0.0

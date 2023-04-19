@@ -19,12 +19,12 @@ import file_analyzer
 import semantic_analysis
 from configuration import Configuration, start_sonar
 from file_analyzer import FileWeight
-from history_analyzer import AnalysisResult, calculate_percentage, CommitRange, Ownership
+from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
 from lib import FileGroup, Contributor, get_contributors, compute_file_ownership, find_contributor, \
     stats_for_contributor, get_flagged_files_by_contributor, ContributionDistribution, Percentage, FlaggedFiles, repo_p, \
     get_tracked_files
 from remote_repository_weight_model import RemoteRepositoryWeightModel
-from repository_hooks import parse_project, Issue, RemoteRepository, GithubRepository
+from repository_hooks import parse_project, RemoteRepository, GithubRepository
 from semantic_analysis import LangElement
 from semantic_weight_model import SemanticWeightModel
 
@@ -338,7 +338,8 @@ def local_syntax_analysis(config: Configuration, grouped_files: List[FileGroup])
     return ret
 
 
-def start_sonar_analysis(config: Configuration, repository_path: str) -> Optional[Tuple[str, Container]]:
+def start_sonar_analysis(config: Configuration, commit_range: CommitRange, repository_path: str) \
+        -> Optional[Tuple[str, Container]]:
     if not config.use_sonarqube:
         print(f"{INFO} Syntax analysis uses SonarQube and 'config.use_sonarqube = False'. Skipping syntax analysis.")
         return None
@@ -397,12 +398,15 @@ def start_sonar_analysis(config: Configuration, repository_path: str) -> Optiona
 
     print()
     print(f"{INFO} SonarQube 'sonar-scanner-cli' is performing analysis in the background...")
+    commit_range.repo.git.execute(['git', 'checkout', '-b', 'sonar-analysis-head', commit_range.head])
+    print(f"{INFO} Switched to branch 'sonar-analysis-head' on current HEAD.")
     try:
         env = {"SONAR_HOST_URL": f"http://localhost:{config.sonarqube_port}",
                "SONAR_SCANNER_OPTS": f"-Dsonar.projectKey={project_key} "
                                      f"-Dsonar.login={config.sonarqube_login} "
                                      f"-Dsonar.password={config.sonarqube_password} "
-                                     f"-Dsonar.java.binaries=**/target"
+                                     f"-Dsonar.java.binaries=**/target "
+                                     f"-Dsonar.branch.name=sonar-analysis-head"
                }
         container = client.containers.run("sonarsource/sonar-scanner-cli:4.8",
                                           environment=env,
@@ -505,6 +509,8 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
             print(f"{SUCCESS} SonarQube analysis finished.")
             sleep(2)
             print()
+
+    repo.git.execute(["git", "branch", "-d", "sonar-analysis-head"])
 
     class IssueDef:
         def __init__(self, severity: str, message: str, file: str, line: int):
@@ -687,6 +693,7 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
         author_contributor = find_contributor(contributors, issue.author)
         header(f"{ISSUES} Issue: {issue.name} - by "
                f"{author_contributor.name if author_contributor is not None else 'None'}")
+        print(f"Link: {issue.url}")
         print(f"Description: {issue.description}")
         # print(f"State: {issue.state}") # TODO this is not very intuitive
         assignee = find_contributor(contributors, issue.assigned_to)
@@ -717,6 +724,7 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
         header(f"{PULL_REQUESTS} Pull request: {pr.name} - by "
                f"{(author_contributor.name if author_contributor is not None else 'None')}")
         print(f"From: {pr.source_branch} to {pr.target_branch}")
+        print(f"Link: {pr.url}")
         print(f"Description: {pr.description}")
         # print(f"State: {pr.merge_status}") # TODO this reports can_be_merged, while already merged
         merger = find_contributor(contributors, pr.merged_by)
@@ -955,6 +963,8 @@ def summary_info(contributors: List[Contributor],
 
     separator()
     print(f"{WEIGHT} Total weight per contributor for {CUBE} SonarQube analysis:")
+    print(f"{INFO} These weights are negative, that is intentional, "
+          f"as the analysis goes though the issues and security concerns.")
     print_section(sonar_weights)
 
     separator()
@@ -1010,8 +1020,6 @@ def display_results() -> None:
     config = Configuration.load_from_file(config_path, rules_path, verbose=False)
 
     tracked_files = get_tracked_files(repo, verbose=True)
-
-
 
     history_analysis = commit_range.analyze()
     scored_files = file_analyzer.assign_scores(tracked_files, history_analysis, config)
