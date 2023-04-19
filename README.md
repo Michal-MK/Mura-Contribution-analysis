@@ -8,8 +8,8 @@ This project uses Jupyter Notebooks. All the necessary information on how to use
 
 ### Requirements
 
-Python 3.9 or higher
-Docker reasonable up to date
+Python 3.9 or higher (Lower version may also be functional, but are generally not supported)\
+Docker reasonably up to date
 
 1) Setup a virtual environment (All commands are run in the current directory)
 
