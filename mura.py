@@ -90,7 +90,7 @@ def print_tree(tree, level=0, prefix='', ownership_cache=None):
             new_prefix = prefix + '│   '
         if isinstance(value, dict):
             if all(isinstance(v, float) for v in value.values()):
-                owners_str = ', '.join([f'{owner.name}: {value * 100:.0f}%' for owner, value in value.items()])
+                owners_str = ', '.join([f'{owner.name}: {value * 100:.0f}%' for owner, value in value.items() if owner.name != '?'])
                 print(f'{prefix}{connector}{name} {CONTRIBUTOR} [{owners_str}]')
             else:
                 sub_ownerships = [calculate_ownership(v, ownership_cache) for v in value.values() if
@@ -100,7 +100,7 @@ def print_tree(tree, level=0, prefix='', ownership_cache=None):
                     print(f'{prefix}{connector}{name}')
                 else:
                     owners_str = ', '.join([f'{owner.name}: {value * 100:.0f}%' for owner, value in
-                                            calculate_ownership(value, ownership_cache).items()])
+                                            calculate_ownership(value, ownership_cache).items() if owner.name != '?'])
                     print(f'{prefix}{connector}{name} {CONTRIBUTOR} [{owners_str}]')
                 print_tree(value, level + 1, new_prefix, ownership_cache)
 
@@ -189,7 +189,7 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
     header(f"{COMMIT} Commits per contributor:")
 
     for contrib, count in commit_distribution.items():
-        print(f"{count} commits by: {CONTRIBUTOR} {contrib}")
+        print(f"{count} commits by: {CONTRIBUTOR} {contrib.name}")
 
     insertions_deletions = []
 
@@ -298,7 +298,7 @@ def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, Li
         print(f"{SUCCESS} No local rules were violated.")
     for c, file_rules in rule_result.items():
         rules_format = [('\t' + str(rule) + os.linesep) for rule in file_rules]
-        print(f"{ERROR} Contributor {c} did not fulfill the following requirements:")
+        print(f"{ERROR} {CONTRIBUTOR} Contributor: '{c.name}' did not fulfill the following requirements:")
         print("".join(rules_format), end='')
         for _ in file_rules:
             ret[c] *= config.file_rule_violation_multiplier
@@ -310,7 +310,7 @@ def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, Li
             print(f"{WARN} No remote repository data to analyze.")
     for c, remote_rules in rule_result_remote.items():
         rules_format = [('\t' + str(rule) + os.linesep) for rule in remote_rules]
-        print(f"{ERROR} Contributor {c} did not fulfill the following requirements:")
+        print(f"{ERROR} {CONTRIBUTOR} Contributor: '{c.name}' did not fulfill the following requirements:")
         print("".join(rules_format), end='')
         for r_rule in remote_rules:
             if r_rule.remote_object == 'issue':
@@ -567,7 +567,7 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
             print(f"{INFO} Project {project_key} has no analysis. Waiting for Sonar to update its database...")
         else:
             date = datetime.strptime(project['lastAnalysisDate'], '%Y-%m-%dT%H:%M:%S%z')
-            if date < datetime.now() - timedelta(minutes=5):
+            if date < (datetime.now() - timedelta(minutes=5)).astimezone():
                 if counter == 10:
                     print(f"{ERROR} Project {project_key} has an old analysis. Database not updated in time.")
                     print(f"{ERROR} Something went very wrong. Did the analysis container fail?")
@@ -761,15 +761,15 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
             print(f"Closed at: {issue.closed_at} by "
                   f"{closer.name if closer is not None else 'None'}")
         issue_weight = remote_weight_model.evaluate(issue, start_date, end_date)
-        beneficiaries = []
+        beneficiaries = set()
         if assignee is not None:
-            beneficiaries.append(assignee)
+            beneficiaries.add(assignee)
             contributor_weight[assignee] += issue_weight
         if closer is not None:
-            beneficiaries.append(closer)
+            beneficiaries.add(closer)
             contributor_weight[closer] += issue_weight
         if author_contributor is not None:
-            beneficiaries.append(author_contributor)
+            beneficiaries.add(author_contributor)
             contributor_weight[author_contributor] += issue_weight
 
         print(f"{WEIGHT} Weight {issue_weight} - Beneficiaries: {', '.join(map(lambda x: x.name, beneficiaries))}")
@@ -789,13 +789,13 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
             print(f"Merged at: {pr.merged_at} by "
                   f"{merger.name if merger is not None else 'None'}")
         pr_weight = remote_weight_model.evaluate(pr, start_date, end_date)
-        beneficiaries = []
+        beneficiaries = set()
         if merger is not None:
-            beneficiaries.append(merger)
+            beneficiaries.add(merger)
             contributor_weight[merger] += pr_weight
         author_contributor = find_contributor(contributors, pr.author)
         if author_contributor is not None:
-            beneficiaries.append(author_contributor)
+            beneficiaries.add(author_contributor)
             contributor_weight[author_contributor] += pr_weight
 
         print(f"{WEIGHT} Weight {pr_weight} - Beneficiaries: {', '.join(map(lambda x: x.name, beneficiaries))}")
@@ -808,6 +808,8 @@ def file_statistics_info(commit_range: CommitRange, contributors: List[Contribut
         -> Dict[str, FlaggedFiles]:
     file_flags = get_flagged_files_by_contributor(commit_range, contributors)
     for contributor in contributors:
+        if contributor.name == '?':
+            continue
         print(f"{CONTRIBUTOR} {contributor})")
         for key, count in file_flags[contributor.name].counts.items():
             print(f" => {key} - {count}")

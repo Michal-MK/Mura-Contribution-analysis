@@ -165,15 +165,19 @@ class CommitRange:
         assert isinstance(result, str)
         return result
 
-    def populate_previously_unseen_file(self, change: 'Change', commit_hash: str, file_name: Path,
+    def populate_previously_unseen_file(self, config: Optional[Configuration], change: 'Change', commit_hash: str,
+                                        file_name: Path,
                                         ret: Dict[Path, 'Ownership'], commit_date: datetime.datetime) -> None:
         file_path = posix_repo_p(str(file_name), self.repo)
         # Obtain the previous version of the file as a base
         content = self.checkout_file_from(commit_hash, file_path)
-        ret[file_name] = Ownership(file_name, len(content.splitlines(keepends=True)), content, commit_date, commit_hash, change.author)
+        ret[file_name] = Ownership(file_name, len(content.splitlines(keepends=True)),
+                                   content, commit_date, commit_hash, '?')
+        if config is not None and config.blame_unseen:
+            ret[file_name].fix_file(self.repo, commit_hash, commit_date)
         ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author, commit_date)
 
-    def analyze(self, verbose=False) -> AnalysisResult:
+    def analyze(self, config: Optional[Configuration] = None, verbose=False) -> AnalysisResult:
         """
         Analyze the repository <repo> from the commit with the hash <historical_commit_hash> to the commit with the hash
         <current_commit_hash>
@@ -199,7 +203,7 @@ class CommitRange:
                             ret[file_name].file = file_name
                             del ret[change.previous_name]
                         else:
-                            self.populate_previously_unseen_file(change, commit_hash, file_name, ret, commit_date)
+                            self.populate_previously_unseen_file(config, change, commit_hash, file_name, ret, commit_date)
                         ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author, commit_date)
                     elif change.hunks and change.hunks[0].mode == 'A':
                         ret[file_name] = Ownership(file_name, change.hunks[0].change_end, change.hunks[0].content,
@@ -210,7 +214,7 @@ class CommitRange:
                     elif change.hunks[0].mode == 'M':
                         # This file already existed in the repo, this can occur if the analysis does not
                         # start from the first commit
-                        self.populate_previously_unseen_file(change, commit_hash, str(file_name), ret, commit_date)
+                        self.populate_previously_unseen_file(config, change, commit_hash, file_name, ret, commit_date)
                     continue
 
                 elif file_name in ret and change.hunks and change.hunks[0].mode == 'A' and not ret[file_name].exists:
@@ -266,7 +270,7 @@ class CommitRange:
 
         return ret
 
-    def find_unmerged_branches(self, end_date: Optional[float] = None) -> List[CommitHistory]:
+    def find_unmerged_branches(self, end_date: Optional[float] = None) -> List[Tuple[str,List[str]]]:
         """
         Find all unmerged branches in the repository <repo>
         :return: A list of all unmerged branches
@@ -292,61 +296,51 @@ class CommitRange:
         all_set = set(all_in_range)
         unmerged_commits = all_set.difference(main_path)
 
-        tree = construct_unmerged_tree(unmerged_commits, all_set, self.repo)
+        ret: List[Tuple[str, List[str]]] = []
 
-        visited = set()
-        for parent, children in filter(lambda x: x[1], tree.items()):
-            if parent in unmerged_commits:
+        starting_points = [x for x in unmerged_commits if x in self.marked_commits]
+
+        outside_range = False
+        for commit in starting_points:
+            if self.repo.commit(commit).committed_datetime < self.hist_commit.committed_datetime or \
+                    self.repo.commit(commit).committed_datetime > self.head_commit.committed_datetime:
+                # This commit is not in the range of the analysis
                 continue
-            if parent in visited:
-                continue
-            assert parent in main_path, f"Parent commit: {parent} not on the main path!"
+            path = []
+            identifier = self.marked_commits[commit]
+            current = commit
+            while current is not None and current not in main_path and not outside_range:
+                path.append(current)
+                current = self.repo.commit(current).parents[0].hexsha
+                if self.repo.commit(current).committed_datetime < self.hist_commit.committed_datetime or \
+                        self.repo.commit(current).committed_datetime > self.head_commit.committed_datetime:
+                    # This commit is not in the range of the analysis
+                    outside_range = True
+            path.append(current)
+            ret.append((identifier, path))
 
-            visited.add(parent)
-
-            ret: List[CommitHistory] = []
-
-            for child in children:
-                path = []
-                identifier: str = ""
-                visited.add(child)
-                while child in tree:
-                    path.append(child)
-                    _parent = child
-                    child = tree[child]
-                    if isinstance(child, list):
-                        if len(child) > 1:
-                            print(f"The unmerged branch branches again.")
-                            break
-                        if len(child) == 0:
-                            if path[-1] in self.marked_commits:
-                                identifier = self.marked_commits[path[-1]]
-                            break
-                        child = child[0]
-                path.insert(0, parent)
-                ret.append(CommitHistory(identifier, path))
-            return ret
-        return []  # No unmerged branches found
+        return ret
 
     def unmerged_commits_info(self, repository: Repo, config: Configuration, contributors: List[Contributor]) -> None:
         end_date = (self.head_commit.committed_datetime + timedelta(days=1)).timestamp()
         unmerged_content = self.find_unmerged_branches(end_date)
-
-        for commit_branch in unmerged_content:
-            print(f'{WARN} Unmerged branch: {commit_branch.name}')
+        for branch, commits in unmerged_content:
+            print()
+            print(f'{WARN} Unmerged branch: {branch}')
             not_first = False
-            for hexsha in commit_branch.path[::-1]:
+
+            for commit in commits:
                 if not_first:
                     print(f'{(" " * 19)}{DOWN_ARROW}{(" " * 19)}')
                 not_first = True
-                commit = repository.commit(hexsha)
-                author = commit.author.name
+                commit_inst = repository.commit(commit)
+                author = commit_inst.author.name
                 assert isinstance(author, str)
                 contrib = find_contributor(contributors, author)
                 assert contrib is not None
-                commit_header = str(commit.message.splitlines()[0])
+                commit_header = str(commit_inst.message.splitlines()[0])
 
-                print(hexsha + f" {RIGHT_ARROW} {COMMIT} Commit: {commit_header} ({contrib.name})")
+                print(commit + f" ({COMMIT} Commit: {commit_header} by '{contrib.name}')")
         if not unmerged_content:
             print(f'{SUCCESS} No unmerged branches found! Everything is in the "{config.default_branch}" branch!')
 
@@ -419,7 +413,7 @@ class Ownership:
         self._line_count = 0
         self.exists = False
 
-    def _fix_file(self, repo: Repo, commit_hash: str, date: datetime.datetime) -> None:
+    def fix_file(self, repo: Repo, commit_hash: str, date: datetime.datetime) -> None:
         blame_res = repo.blame(commit_hash, posix_repo_p(str(self.file), repo))
         assert blame_res is not None
         self.changes = []
@@ -469,7 +463,7 @@ class Ownership:
                     try:
                         self.changes.pop(hunk.change_start)
                     except IndexError:
-                        self._fix_file(repo, commit_hash, date)
+                        self.fix_file(repo, commit_hash, date)
 
                 new_file_index_offset -= hunk.prev_len
                 abs_changes += hunk.prev_len
@@ -486,7 +480,7 @@ class Ownership:
                         prev_line_authors.append((self.changes[file_start].author, self.changes[file_start].content))
                         self.changes.pop(file_start)
                     except IndexError:
-                        self._fix_file(repo, commit_hash, date)
+                        self.fix_file(repo, commit_hash, date)
                 for i in range(hunk.new_len):
                     if hunk.new_len - 1 - i < len(prev_line_authors) and \
                             new_meta[hunk.new_len - 1 - i].content.strip() == \

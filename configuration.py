@@ -43,6 +43,7 @@ class Configuration:
         self.sonarqube_password = "admin"
         self.check_whitespace_changes = True
         self.ignore_remote_repo = False
+        self.blame_unseen = True
         self.anonymous_mode = False
         self.ignored_extensions: List[str] = []
 

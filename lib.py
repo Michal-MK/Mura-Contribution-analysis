@@ -224,7 +224,7 @@ class Contributor:
         self.aliases: List['Contributor'] = []
 
     def contrib_equal(self, other: Union[Actor, Contributor]):
-        return self.name == other.name and self.email == other.email or \
+        return self.name == other.name or self.email == other.email or \
             any([a.contrib_equal(other) for a in self.aliases])
 
     def __eq__(self, other):
@@ -245,7 +245,7 @@ class Contributor:
 
     @classmethod
     def unknown(cls):
-        return Contributor('UNKNOWN', 'UNKNOWN')
+        return Contributor('?', '?')
 
 
 class Percentage:
@@ -287,13 +287,16 @@ def get_contributors(config: 'Configuration', commit_range: CommitRange, match_o
                 other.aliases.append(it)
                 matched = True
                 break
-            if config.contributor_map is not None:
+            if config.contributor_map is not None or config.contributor_map:
                 for a, b in config.contributor_map:
                     if it.name == a and other.name == b or \
                             it.name == b and other.name == a:
                         other.aliases.append(it)
                         matched = True
                         break
+            if it in other.aliases:
+                matched = True
+                break
 
         if not matched:
             it.aliases.append(Contributor(unidecode(it.name), it.email))
@@ -307,6 +310,8 @@ def get_contributors(config: 'Configuration', commit_range: CommitRange, match_o
             contributor.email = f"contributor{count}@email.cz"
             contributor.anonymized = True
             count += 1
+
+    matched_contributors.append(Contributor.unknown())
 
     return matched_contributors
 
