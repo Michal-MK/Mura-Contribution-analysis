@@ -1,3 +1,9 @@
+1.3.0
+- Fix GitLab repository not found when ending with '/'... the library is very picky
+- Fix graph output writing to `$CWD` as `.stem` does not include the absolute path
+- Add `config.sonarqube_analysis_container_timeout_seconds` and `--sq-container-exit-timeout SECONDS` to handle cases where the analysis container runs indefinitely/is not removed.
+- Remove more instances of printing the '?' contributor
+
 1.2.1
 - Improve internal parameter naming
 - Graphs are now output along the `-f` output file, rather than to the analyzed repository, the name stays, but is prefixed with a `.stem` of the output file.

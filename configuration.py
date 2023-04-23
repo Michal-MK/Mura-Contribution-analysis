@@ -38,6 +38,7 @@ class Configuration:
         self._use_sonarqube = False
         self.sonarqube_persistent = True
         self.sonarqube_keep_analysis_container = False
+        self.sonarqube_analysis_container_timeout_seconds = 120
         self.sonarqube_port = 8085
         self.sonarqube_login = "admin"
         self.sonarqube_password = "admin"

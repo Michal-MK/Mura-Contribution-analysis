@@ -161,8 +161,11 @@ def display_contributor_info(commit_range: CommitRange, config: Configuration) -
     header(f"{CONTRIBUTOR} Contributors:")
 
     for contrib in contributors:
+        if contrib.name == '?' and contrib.email == '?':
+            continue
         print(contrib)
 
+    print()
     return contributors
 
 
@@ -236,11 +239,15 @@ def percentage_info(analysis_res: AnalysisResult, contributors: List[Contributor
     percentage = calculate_percentage(contributors, analysis_res)
 
     for contributor_name, percent in percentage.global_contribution.items():
+        if contributor_name == '?':
+            continue
         print(f'\t{contributor_name}: {percent:.2%}')
 
     ownership = compute_file_ownership(percentage, config, repo)
 
     for contributor, contribution in ownership.items():
+        if contributor.name == '?':
+            continue
         print(f"Files owned by {CONTRIBUTOR} {contributor.name}")
         for contrib_distribution in contribution:
             print(f"\t{contrib_distribution}")
@@ -519,11 +526,19 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
     url = f'http://localhost:{config.sonarqube_port}'
     sonar = SonarQubeClient(sonarqube_url=url, username=config.sonarqube_login, password=config.sonarqube_password)
 
+    seconds_waited = 0
     while analysis_running:
         try:
             _ = client.containers.get("mura-sonarqube-scanner-instance")
             print(f"{INFO} Analysis is running. Waiting for it to finish...")
             sleep(2)
+            seconds_waited += 2
+            if seconds_waited > config.sonarqube_analysis_container_timeout_seconds:
+                print(f"{ERROR} SonarQube Analysis is taking too long. Is it stuck/expected?")
+                print(f"{INFO} You can increase the timeout with 'config.sonarqube_analysis_container_timeout_seconds' "
+                      f"or the --sq-container-exit-timeout flag. You can also inspect the container for errors."
+                      f"Current value: {config.sonarqube_analysis_container_timeout_seconds}s.")
+                exit(1)
         except Exception:
             analysis_running = False
             print(f"{SUCCESS} SonarQube analysis finished.")
@@ -966,6 +981,8 @@ def hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Co
     ret: Dict[Contributor, Tuple[int, int]] = {}
 
     for contributor in contributors:
+        if contributor.name == '?' and contributor.email == '?':
+            continue
         print(f"{CONTRIBUTOR} {contributor.name} has:")
         print(f" => {len(commits_by_author[contributor])} commits")
         hours = estimate_hours(commits_by_author[contributor])
@@ -987,6 +1004,8 @@ def gaussian_weights(config: Configuration, hour_estimate: float,
     ret: Dict[Contributor, float] = defaultdict(lambda: 0.0)
     header(f"{WEIGHT} Gaussian weights:")
     for contributor, commits_hours in hours.items():
+        if contributor.name == '?' and contributor.email == '?':
+            continue
         print(f"{CONTRIBUTOR} {contributor.name}:")
         if commits_hours[1] != 0:
             weight = gaussian(config, hour_estimate, commits_hours[1])
@@ -1014,6 +1033,8 @@ def summary_info(contributors: List[Contributor],
             return
 
         for contrib in contributors:
+            if contrib.name == '?' and contrib.email == '?':
+                continue
             if contrib in section:
                 print(f" -> {contrib.name}: {section[contrib]:.2f}")
                 if add:
@@ -1072,6 +1093,11 @@ def path_leaf(path):
     head, tail = ntpath.split(path)
     return tail or ntpath.basename(head)
 
+def new_file(base_path: Optional[Path], file: str) -> Optional[Path]:
+    if not base_path:
+        return None
+    return Path(str(base_path) + file)
+
 
 def display_results(arguments: argparse.Namespace) -> None:
     import fs_access as file_system
@@ -1087,6 +1113,7 @@ def display_results(arguments: argparse.Namespace) -> None:
     config.use_sonarqube = not arguments.no_sonarqube
     config.sonarqube_persistent = not arguments.sq_no_persistence
     config.sonarqube_keep_analysis_container = arguments.sq_keep_analysis_container
+    config.sonarqube_analysis_container_timeout_seconds = arguments.sq_container_exit_timeout
     config.sonarqube_login = arguments.sq_login
     config.sonarqube_password = arguments.sq_password
     config.sonarqube_port = arguments.sq_port
@@ -1114,12 +1141,15 @@ def display_results(arguments: argparse.Namespace) -> None:
     semantic_analysis_grouped_result = semantic_analysis.compute_semantic_weight_result(config, tracked_files,
                                                                                         verbose=True)
     separator()
+    base_file_path = Path(arguments.file).parent if arguments.file else None
+    if base_file_path:
+        base_file_path = base_file_path / Path(arguments.file).stem
     commit_distribution, insertions_deletions = commit_info(commit_range, repo, contributors)
     insertions_deletions_info(insertions_deletions,
-                              output_path=Path(Path(arguments.file).stem + "_ins-del.png") if arguments.file else None)
+                              output_path=new_file(base_file_path, "_ins-del.png"))
     separator()
     plot_commits([x for x in commit_range][1:], commit_range, contributors,
-                 output_path=Path(Path(arguments.file).stem + "_commits.png") if arguments.file else None)
+                 output_path=new_file(base_file_path, "_commits.png"))
     separator()
     _ = file_statistics_info(commit_range, contributors)
     separator()
@@ -1184,6 +1214,8 @@ if __name__ == '__main__':
                         help='Use SonarQube in non-persistent mode - data will be stored in the container')
     parser.add_argument('--sq-keep-analysis-container', action='store_true', default=False,
                         help='Keep the analysis container on analysis end, intended for debugging purposes!')
+    parser.add_argument('--sq-container-exit-timeout', type=int, default=120, metavar="SECONDS",
+                        help='Timeout if the SonarQube analysis takes too long')
     parser.add_argument('--sq-login', type=str, default='admin', metavar="STR",
                         help='SonarQube login')
     parser.add_argument('--sq-password', type=str, default='admin', metavar="STR",

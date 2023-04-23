@@ -92,6 +92,8 @@ class GitLabRepository(RemoteRepository):
             project_path = project_path[1:]
         if project_path.endswith(".git"):
             project_path = project_path[:-4]
+        if project_path.endswith("/"):
+            project_path = project_path[:-1]
         self.project = self.connection.projects.get(project_path, lazy=False)
         self.name = self.project.name
 
