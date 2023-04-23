@@ -432,7 +432,7 @@ def start_sonar_analysis(config: Configuration, repository_path: str) \
                                           environment=env,
                                           volumes={repository_path: {'bind': '/usr/src', 'mode': 'rw'}},
                                           name="mura-sonarqube-scanner-instance",
-                                          remove=config.remove_analysis_container_on_analysis_end,
+                                          remove=not config.sonarqube_keep_analysis_container,
                                           network_mode='host',
                                           detach=True)
     except Exception as ex:
@@ -445,7 +445,7 @@ def start_sonar_analysis(config: Configuration, repository_path: str) \
 def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[ContributionDistribution]],
                       local_syntax: Dict[Path, FileWeight], repo: Repo, file_maturity_score: Dict[Path, float],
                       n_extreme_files: int = 5) -> ContributorWeight:
-    header("Raw file weights:")
+    header(f"{SYNTAX} Local Syntax Analysis")
 
     assert n_extreme_files >= 0, "n_extreme_files must be non-negative."
 
@@ -474,7 +474,7 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
         if file in file_maturity_score:
             file_weight_inst.file_weight *= file_maturity_score[file]
             mult_note = f" adjusted *({file_maturity_score[file]})"
-        print(f" - {file} -> {WEIGHT} Weight: {file_weight_inst.syntactic_weight}" + mult_note)
+        print(f" - {repo_p(str(file), repo)} -> {WEIGHT} Weight: {file_weight_inst.syntactic_weight}" + mult_note)
         if not contributor:
             continue
         per_contributor[contributor].append(file_weight_inst.syntactic_weight)
@@ -1084,14 +1084,14 @@ def display_results(arguments: argparse.Namespace) -> None:
     config = configuration.validate()
 
     config.ignore_remote_repo = arguments.ignore_remote_repo
-    config.use_sonarqube = arguments.use_sonarqube
-    config.sonarqube_persistent = arguments.sq_persistent
-    config.remove_analysis_container_on_analysis_end = arguments.sq_remove_analysis_container_on_analysis_end
+    config.use_sonarqube = not arguments.no_sonarqube
+    config.sonarqube_persistent = not arguments.sq_no_persistence
+    config.sonarqube_keep_analysis_container = arguments.sq_keep_analysis_container
     config.sonarqube_login = arguments.sq_login
     config.sonarqube_password = arguments.sq_password
     config.sonarqube_port = arguments.sq_port
 
-    config.check_whitespace_changes = arguments.check_whitespace_changes
+    config.ignore_whitespace_changes = arguments.ignore_whitespace_changes
     config.ignored_extensions = arguments.ignored_extensions
 
     config.post_validate()
@@ -1175,25 +1175,25 @@ if __name__ == '__main__':
     parser.add_argument('--hour_estimate_per_contributor', type=int, default=24, metavar='N',
                         help='The expected amount of hours students are expected to spend on the project '
                              '(for the given commit range), used for hour weight estimation.')
-    parser.add_argument('--anonymous-mode', type=bool, default=False, metavar="BOOL",
+    parser.add_argument('--anonymous-mode', action='store_true', default=False,
                         help='Anonymous mode, All contributor names will be replaced with "Contributor #n"')
-    parser.add_argument('--use-sonarqube', type=bool, default=True, metavar="BOOL",
-                        help='Use SonarQube')
-    parser.add_argument('--sq-persistent', type=bool, default=True, metavar="BOOL",
-                        help='SonarQube persistent')
-    parser.add_argument('--sq-remove-analysis-container-on-analysis-end', type=bool, default=True, metavar="BOOL",
-                        help='Remove analysis container on analysis end')
+    parser.add_argument('--no-sonarqube', action='store_true', default=False,
+                        help='Do not use SonarQube analysis')
+    parser.add_argument('--sq-no-persistence', action='store_true', default=False,
+                        help='Use SonarQube in non-persistent mode - data will be stored in the container')
+    parser.add_argument('--sq-keep-analysis-container', action='store_true', default=False,
+                        help='Keep the analysis container on analysis end, intended for debugging purposes!')
     parser.add_argument('--sq-login', type=str, default='admin', metavar="STR",
                         help='SonarQube login')
     parser.add_argument('--sq-password', type=str, default='admin', metavar="STR",
                         help='SonarQube password')
     parser.add_argument('--sq-port', type=int, default=8080, metavar="PORT",
                         help='SonarQube port')
-    parser.add_argument('--check-whitespace-changes', type=bool, default=True, metavar="BOOL",
-                        help='Check for whitespace changes in the file')
+    parser.add_argument('--ignore-whitespace-changes', action='store_false', default=True,
+                        help='Ignore whitespace changes in files, whitespace only change will alter line ownership')
     parser.add_argument('--ignored-extensions', type=str, nargs='+', default=[], metavar="EXT",
                         help='Extensions to ignore during analysis')
-    parser.add_argument('--ignore-remote-repo', type=bool, default=False, metavar="BOOL",
+    parser.add_argument('--ignore-remote-repo', action='store_true', default=False,
                         help='Ignore remote repository, in case of no internet connection or other reasons')
 
     args = parser.parse_args()
