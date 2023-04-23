@@ -202,7 +202,7 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
 
 
 def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int, int]],
-                              file_output: Optional[Path] = None) -> Any:
+                              output_path: Optional[Path] = None) -> Any:
     insertions_deletions.sort(key=lambda x: x[1], reverse=True)
 
     contributor_names = [x[0].name for x in insertions_deletions]
@@ -223,8 +223,8 @@ def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int,
 
     fig.subplots_adjust(wspace=0.5)
 
-    if file_output is not None:
-        plt.savefig(file_output)
+    if output_path is not None:
+        plt.savefig(output_path)
     else:
         plt.show()
 
@@ -1115,10 +1115,11 @@ def display_results(arguments: argparse.Namespace) -> None:
                                                                                         verbose=True)
     separator()
     commit_distribution, insertions_deletions = commit_info(commit_range, repo, contributors)
-    insertions_deletions_info(insertions_deletions, Path(repository_path) / "ins_del.png")
+    insertions_deletions_info(insertions_deletions,
+                              output_path=Path(Path(arguments.file).stem + "_ins-del.png") if arguments.file else None)
     separator()
     plot_commits([x for x in commit_range][1:], commit_range, contributors,
-                 output_path=Path(repository_path) / "commits.png")
+                 output_path=Path(Path(arguments.file).stem + "_commits.png") if arguments.file else None)
     separator()
     _ = file_statistics_info(commit_range, contributors)
     separator()

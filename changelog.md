@@ -1,3 +1,7 @@
+1.2.1
+- Improve internal parameter naming
+- Graphs are now output along the `-f` output file, rather than to the analyzed repository, the name stays, but is prefixed with a `.stem` of the output file.
+
 1.2
 - Changed the way arguments are parsed, since `argparse` does not like boolean values (Python treats `bool('False') == True`), the changes are:
 - `--use-sonarqube BOOL` is now `--no-sonarqube`
