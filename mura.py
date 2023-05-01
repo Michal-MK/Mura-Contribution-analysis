@@ -1244,3 +1244,5 @@ if __name__ == '__main__':
             print(e)
             print(f"Failed to write to file: '{args.file}'")
             sys.exit(1)
+    else:
+        display_results(args)
