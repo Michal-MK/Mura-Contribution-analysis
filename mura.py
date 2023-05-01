@@ -1102,11 +1102,6 @@ def new_file(base_path: Optional[Path], file: str) -> Optional[Path]:
 def display_results(arguments: argparse.Namespace) -> None:
     import fs_access as file_system
 
-    repository_path = arguments.repo
-
-    repo = Repo(repository_path)
-    commit_range = CommitRange(repo, arguments.head, arguments.root, verbose=True)
-
     config = configuration.validate()
 
     config.ignore_remote_repo = arguments.ignore_remote_repo
@@ -1125,7 +1120,11 @@ def display_results(arguments: argparse.Namespace) -> None:
 
     config.contributor_map = arguments.contributor_map
 
+    repository_path = arguments.repo
+
     repository = file_system.validate_repository(repository_path, config)
+    commit_range = CommitRange(repository, arguments.head, arguments.root, verbose=True)
+
 
     config.anonymous_mode = arguments.anonymous_mode
 
@@ -1144,7 +1143,7 @@ def display_results(arguments: argparse.Namespace) -> None:
     base_file_path = Path(arguments.file).parent if arguments.file else None
     if base_file_path:
         base_file_path = base_file_path / Path(arguments.file).stem
-    commit_distribution, insertions_deletions = commit_info(commit_range, repo, contributors)
+    commit_distribution, insertions_deletions = commit_info(commit_range, repository, contributors)
     insertions_deletions_info(insertions_deletions,
                               output_path=new_file(base_file_path, "_ins-del.png"))
     separator()
@@ -1153,9 +1152,9 @@ def display_results(arguments: argparse.Namespace) -> None:
     separator()
     _ = file_statistics_info(commit_range, contributors)
     separator()
-    percentage, ownership = percentage_info(history_analysis_result, contributors, config, repo)
+    percentage, ownership = percentage_info(history_analysis_result, contributors, config, repository)
     separator()
-    display_dir_tree(percentage, repo)
+    display_dir_tree(percentage, repository)
     separator()
 
     lines_blanks_comments_info(repository, ownership, semantic_analysis_grouped_result, tracked_files,
@@ -1163,9 +1162,9 @@ def display_results(arguments: argparse.Namespace) -> None:
     separator()
     commit_range.unmerged_commits_info(repository, config, contributors)
     separator()
-    sonar_weights = sonar_info(config, contributors, repo, ownership, project_key)
+    sonar_weights = sonar_info(config, contributors, repository, ownership, project_key)
     separator()
-    local_syntax_weights = local_syntax_info(config, ownership, syntactic_analysis_result, repo,
+    local_syntax_weights = local_syntax_info(config, ownership, syntactic_analysis_result, repository,
                                              file_history_multiplier)
     separator()
     semantic_weights = semantic_info(tracked_files, ownership, semantic_analysis_grouped_result,
@@ -1177,9 +1176,9 @@ def display_results(arguments: argparse.Namespace) -> None:
 
     hour_weights = gaussian_weights(config, arguments.hour_estimate_per_contributor, hours)
     separator()
-    project, repo_management_weights = remote_info(commit_range, repo, config, contributors)
+    project, repo_management_weights = remote_info(commit_range, repository, config, contributors)
     separator()
-    global_rule_weight_multiplier = rule_info(config, repo, ownership, contributors, project)
+    global_rule_weight_multiplier = rule_info(config, repository, ownership, contributors, project)
     separator()
     summary_info(contributors, sonar_weights, semantic_weights, local_syntax_weights, repo_management_weights,
                  global_rule_weight_multiplier, hour_weights, file_history_multiplier)
