@@ -48,6 +48,7 @@ class Configuration:
         self.blame_unseen = True
         self.anonymous_mode = False
         self.ignored_extensions: List[str] = []
+        self.validated_analyzers: List[str] = []
 
         self.contributor_map: Optional[List[Tuple[str, str]]] = None
         self.parsed_rules: RuleCollection = RuleCollection([])
@@ -121,7 +122,7 @@ class Configuration:
         return ret
 
 
-def list_semantic_analyzers():
+def list_semantic_analyzers(config: Configuration):
     def dump(info: List[str]):
         for line in info:
             print(line)
@@ -143,6 +144,8 @@ def list_semantic_analyzers():
                     info.append(f"{LAUNCH} Test file exists! Running it...")
                     subprocess.run([*launch_command.split(), str(test_file), semantics_path / 'declarations.json'])
                     info.append(f"{SUCCESS} Test file ran successfully!")
+                    config.validated_analyzers.append(fsi.name)
+
                 except Exception as e:
                     info.append(f"{ERROR} Test file failed to run! {e}")
                     info.append(f"{ERROR} Likely, the necessary dependencies/runtime is not installed!")
@@ -175,7 +178,7 @@ def validate() -> 'Configuration':
     print(f"{SUCCESS} Configuration loaded successfully!")
 
     print()
-    list_semantic_analyzers()
+    list_semantic_analyzers(configuration)
 
     return configuration
 
