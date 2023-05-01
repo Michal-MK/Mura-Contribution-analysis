@@ -137,18 +137,21 @@ def list_semantic_analyzers(config: Configuration):
             target = fsi / "target"
             if target.exists():
                 info.append(f"{LAUNCH} Launch command in 'target': {target.read_text(encoding='utf-8-sig')}")
-            test_file = fsi / ("testfile." + fsi.name)
-            if test_file.exists() and target.exists():
+                launch_command = target.read_text(encoding='utf-8-sig')
                 try:
-                    launch_command = target.read_text(encoding='utf-8-sig')
-                    info.append(f"{LAUNCH} Test file exists! Running it...")
-                    subprocess.run([*launch_command.split(), str(test_file), semantics_path / 'declarations.json'])
-                    info.append(f"{SUCCESS} Test file ran successfully!")
-                    config.validated_analyzers.append(fsi.name)
-
+                    os.chdir(Path(__file__).parent / fsi)
+                    test_file = Path("testfile." + fsi.name)
+                    if test_file.exists():
+                        info.append(f"{LAUNCH} Test file exists! Running it...")
+                        res = subprocess.run([*launch_command.split(), str(test_file), str(semantics_path / 'declarations.json')])
+                        res.check_returncode()
+                        info.append(f"{SUCCESS} Test file ran successfully!")
+                        config.validated_analyzers.append(fsi.name)
                 except Exception as e:
                     info.append(f"{ERROR} Test file failed to run! {e}")
                     info.append(f"{ERROR} Likely, the necessary dependencies/runtime is not installed!")
+                finally:
+                    os.chdir(Path(__file__).parent)
             else:
                 info.append(f"{ERROR} -> '{target}' does not exist! I have no idea how to launch this analyzer!")
                 dump(info)
