@@ -184,7 +184,7 @@ def compute_semantic_weight_grouped(config: Configuration, file_group: FileGroup
                 unsorted_ret.append((file, SemanticWeightModel(), LangElement('root', None, [])))
         else:
             if ext not in config.validated_analyzers:
-                print(f"{ERROR} '.{ext}' is not validated, the {LAUNCH} Launch command in `target`"
+                print(f"{ERROR} '{ext}' is not validated, the {LAUNCH} Launch command in `target`"
                       f" did not complete successfully on the test file.")
                 print(f"{ERROR} This is likely not intended, therefore Mura will now exit.")
                 print(f"{ERROR} Please check the output of the {LAUNCH} Launch command and fix the issues"
