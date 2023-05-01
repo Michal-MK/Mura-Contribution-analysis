@@ -9,6 +9,10 @@
   - run validation for the repository folder instead of blindly calling the repo constructor
   - fix no `-f` argument terminating the program rather than printing to `stdout`
 
+1.3.1
+- improvements to contributor matching
+- fix pure renames being treated as binary files causing issues with ownership
+
 1.3.0
 - Fix GitLab repository not found when ending with '/'... the library is very picky
 - Fix graph output writing to `$CWD` as `.stem` does not include the absolute path

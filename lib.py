@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Union, List, Optional, Set, Dict, Tuple, DefaultDict, Any, TYPE_CHECKING
 from unidecode import unidecode
 
-
 from git import Repo, Commit, Actor
 
 from uni_chars import *
@@ -34,7 +33,6 @@ class FileGroup:
 
     def __repr__(self):
         return self.__str__()
-
 
 
 def first_commit(commit: Commit) -> Commit:
@@ -200,12 +198,14 @@ def filter_related_groups(groups: List[FileGroup]) -> List[FileGroup]:
 
     return ret
 
+
 def posix_repo_p(file_name: str, repo: Repo) -> str:
     repo_dir = repo.working_dir
     assert repo_dir is not None
     if file_name.startswith(str(repo_dir)):
         return Path(os.path.relpath(file_name, repo_dir)).as_posix()
     return (Path(repo_dir) / file_name).resolve().as_posix()
+
 
 def repo_p(file_name: str, repo: Repo) -> Path:
     repo_dir = repo.working_dir
@@ -226,6 +226,10 @@ class Contributor:
         return self.name == other.name or self.email == other.email or \
             any([a.contrib_equal(other) for a in self.aliases])
 
+    def append_alias(self, contributor: Contributor):
+        if contributor.name not in map(lambda s: s.name, self.aliases):
+            self.aliases.append(contributor)
+
     def __eq__(self, other):
         if isinstance(other, str):
             return self.name == other or self.email == other or any([a.name == other for a in self.aliases])
@@ -245,6 +249,10 @@ class Contributor:
     @classmethod
     def unknown(cls):
         return Contributor('?', '?')
+
+    @property
+    def normalized(self) -> Contributor:
+        return Contributor(unidecode(self.name), self.email)
 
 
 class Percentage:
@@ -275,30 +283,37 @@ def get_contributors(config: 'Configuration', commit_range: CommitRange, match_o
             if it.name == other.name and it.email == other.email:
                 continue
             if it.name == other.name or it.email == other.email and (match_on_name and match_on_email):
-                other.aliases.append(it)
+                other.append_alias(it)
                 matched = True
                 break
             if it.name == other.name and match_on_name and not match_on_email:
-                other.aliases.append(it)
+                other.append_alias(it)
                 matched = True
                 break
             if it.email == other.email and match_on_email and not match_on_name:
-                other.aliases.append(it)
+                other.append_alias(it)
                 matched = True
                 break
             if config.contributor_map is not None or config.contributor_map:
                 for a, b in config.contributor_map:
                     if it.name == a and other.name == b or \
                             it.name == b and other.name == a:
-                        other.aliases.append(it)
+                        other.append_alias(it)
                         matched = True
                         break
-            if it in other.aliases:
+                    if it.name in [a, b]:
+                        if a in map(lambda o: o.name, other.aliases) or \
+                                b in map(lambda o: o.name, other.aliases):
+                            matched = True
+                            other.append_alias(it)
+                            break
+            if it.normalized in other.aliases:
                 matched = True
+                other.append_alias(it)
                 break
 
         if not matched:
-            it.aliases.append(Contributor(unidecode(it.name), it.email))
+            it.append_alias(Contributor(unidecode(it.name), it.email))
             matched_contributors.append(it)
 
     if config.anonymous_mode:
