@@ -820,13 +820,13 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
 
 
 def file_statistics_info(commit_range: CommitRange, contributors: List[Contributor]) \
-        -> Dict[str, FlaggedFiles]:
+        -> Dict[Contributor, FlaggedFiles]:
     file_flags = get_flagged_files_by_contributor(commit_range, contributors)
     for contributor in contributors:
         if contributor.name == '?':
             continue
         print(f"{CONTRIBUTOR} {contributor})")
-        for key, count in file_flags[contributor.name].counts.items():
+        for key, count in file_flags[contributor].counts.items():
             print(f" => {key} - {count}")
     return file_flags
 
