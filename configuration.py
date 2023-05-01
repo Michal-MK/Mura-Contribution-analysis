@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -135,6 +136,16 @@ def list_semantic_analyzers():
             target = fsi / "target"
             if target.exists():
                 info.append(f"{LAUNCH} Launch command in 'target': {target.read_text(encoding='utf-8-sig')}")
+            test_file = fsi / ("testfile." + fsi.name)
+            if test_file.exists() and target.exists():
+                try:
+                    launch_command = target.read_text(encoding='utf-8-sig')
+                    info.append(f"{LAUNCH} Test file exists! Running it...")
+                    subprocess.run([*launch_command.split(), str(test_file), semantics_path / 'declarations.json'])
+                    info.append(f"{SUCCESS} Test file ran successfully!")
+                except Exception as e:
+                    info.append(f"{ERROR} Test file failed to run! {e}")
+                    info.append(f"{ERROR} Likely, the necessary dependencies/runtime is not installed!")
             else:
                 info.append(f"{ERROR} -> '{target}' does not exist! I have no idea how to launch this analyzer!")
                 dump(info)
