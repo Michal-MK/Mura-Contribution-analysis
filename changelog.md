@@ -1,3 +1,7 @@
+1.3.1
+- improvements to contributor matching
+- fix pure renames being treated as binary files causing issues with ownership
+
 1.3.0
 - Fix GitLab repository not found when ending with '/'... the library is very picky
 - Fix graph output writing to `$CWD` as `.stem` does not include the absolute path

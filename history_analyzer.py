@@ -208,6 +208,14 @@ class CommitRange:
                     elif change.hunks and change.hunks[0].mode == 'A':
                         ret[file_name] = Ownership(file_name, change.hunks[0].change_end, change.hunks[0].content,
                                                    commit_date, commit_hash, change.author)
+                    elif not change.hunks and change.previous_name is not None:
+                        # Just a pure rename no other changes
+                        if change.previous_name in ret:
+                            ret[file_name] = ret[change.previous_name]
+                            ret[file_name].file = file_name
+                            del ret[change.previous_name]
+                        else:
+                            self.populate_previously_unseen_file(config, change, commit_hash, file_name, ret, commit_date)
                     elif not change.hunks:
                         # This is a binary file or empty file
                         ret[file_name] = Ownership(file_name, -1, '', commit_date, commit_hash, change.author)
