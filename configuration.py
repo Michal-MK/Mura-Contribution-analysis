@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -47,6 +48,7 @@ class Configuration:
         self.blame_unseen = True
         self.anonymous_mode = False
         self.ignored_extensions: List[str] = []
+        self.validated_analyzers: List[str] = []
 
         self.contributor_map: Optional[List[Tuple[str, str]]] = None
         self.parsed_rules: RuleCollection = RuleCollection([])
@@ -120,7 +122,7 @@ class Configuration:
         return ret
 
 
-def list_semantic_analyzers():
+def list_semantic_analyzers(config: Configuration):
     def dump(info: List[str]):
         for line in info:
             print(line)
@@ -135,6 +137,21 @@ def list_semantic_analyzers():
             target = fsi / "target"
             if target.exists():
                 info.append(f"{LAUNCH} Launch command in 'target': {target.read_text(encoding='utf-8-sig')}")
+                launch_command = target.read_text(encoding='utf-8-sig')
+                try:
+                    os.chdir(Path(__file__).parent / fsi)
+                    test_file = Path("testfile." + fsi.name)
+                    if test_file.exists():
+                        info.append(f"{LAUNCH} Test file exists! Running it...")
+                        res = subprocess.run([*launch_command.split(), str('../declarations.json'), str(test_file)], capture_output=True, text=True)
+                        res.check_returncode()
+                        info.append(f"{SUCCESS} Test file ran successfully!")
+                        config.validated_analyzers.append('.' + fsi.name)
+                except Exception as e:
+                    info.append(f"{ERROR} Test file failed to run! {e}")
+                    info.append(f"{ERROR} Likely, the necessary dependencies/runtime is not installed!")
+                finally:
+                    os.chdir(Path(__file__).parent)
             else:
                 info.append(f"{ERROR} -> '{target}' does not exist! I have no idea how to launch this analyzer!")
                 dump(info)
@@ -164,7 +181,7 @@ def validate() -> 'Configuration':
     print(f"{SUCCESS} Configuration loaded successfully!")
 
     print()
-    list_semantic_analyzers()
+    list_semantic_analyzers(configuration)
 
     return configuration
 

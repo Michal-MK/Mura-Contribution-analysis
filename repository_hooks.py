@@ -86,7 +86,9 @@ class GitLabRepository(RemoteRepository):
             self.connection.auth()
         except Exception as e:
             print(f"{ERROR} Could not connect to GitLab instance at {host}, check your access token.")
-            raise e
+            print(f"{ERROR} {e}")
+            print(f"{ERROR} This is fatal -> Exiting...")
+            exit(1)
 
         if project_path.startswith("/"):
             project_path = project_path[1:]
@@ -156,7 +158,9 @@ class GithubRepository(RemoteRepository):
             self.connection = github.Github(access_token)
         except Exception as e:
             print(f"{ERROR} Could not connect to GitHub, check your access token.")
-            raise e
+            print(f"{ERROR} {e}")
+            print(f"{ERROR} This is fatal -> Exiting...")
+            exit(1)
 
         self.project = self.connection.get_repo(project_path)
         self.name = self.project.name

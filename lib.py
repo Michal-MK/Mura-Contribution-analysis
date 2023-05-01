@@ -87,7 +87,7 @@ def get_files_with_flags(commit: Commit) -> Dict[str, List[Union[int, List[Any]]
 
 
 def get_flagged_files_by_contributor(commit_range: CommitRange, contributors: List[Contributor]) -> Dict[
-    str, FlaggedFiles]:
+    Contributor, FlaggedFiles]:
     result = {}
     for commit_hexsha in commit_range:
         commit = commit_range.commit(commit_hexsha)
@@ -95,14 +95,13 @@ def get_flagged_files_by_contributor(commit_range: CommitRange, contributors: Li
         contributor = next((c for c in contributors if c == author), None)
         if contributor is None:
             continue
-        name = contributor.name
-        if name not in result:
-            result[name] = FlaggedFiles()
+        if contributor not in result:
+            result[contributor] = FlaggedFiles()
         flagged_files = get_files_with_flags(commit)
         for flag, (count, paths) in flagged_files.items():
             assert isinstance(count, int), f"Count is not an int: {count}, this is very much not expected... How?"
             assert isinstance(paths, list), f"Paths is not a list: {paths}, this is very much not expected... How?"
-            result[name].update(flag, count, paths)
+            result[contributor].update(flag, count, paths)
     return result
 
 

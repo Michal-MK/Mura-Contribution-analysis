@@ -345,7 +345,8 @@ class CommitRange:
                 author = commit_inst.author.name
                 assert isinstance(author, str)
                 contrib = find_contributor(contributors, author)
-                assert contrib is not None
+                if contrib is None:
+                    contrib = Contributor.unknown()
                 commit_header = str(commit_inst.message.splitlines()[0])
 
                 print(commit + f" ({COMMIT} Commit: {commit_header} by '{contrib.name}')")

@@ -22,17 +22,22 @@ python3 -m venv ./venv
 python -m venv ./venv
 ```
 
+In case your system does not come with the `venv` module, you should be presented with the correct command for your distribution to install it. 
+
 Activate the virtual environment
 
 ```bash
 ./venv/bin/activate
 ```
 
+Note: On linux distributions you may need to run `source ./venv/bin/activate` to execute the script.
+
 Install the requirements
 
 ```bash
 pip install -r requirements.txt
 ```
+Note: On linux distributions you may need to run `pip3 install -r requirements.txt` to execute the script.
 
 ### Running the project
 

@@ -111,7 +111,7 @@ class LangSemantics:
 
         file_names = [str(file) for file in files]
         args = [*self.tool.split(), str(self.lang_dir.parent / "declarations.json"), *file_names]
-        process = subprocess.run(args, check=True, cwd=self.lang_dir, stdout=subprocess.PIPE, shell=True)
+        process = subprocess.run(args, check=True, cwd=self.lang_dir, stdout=subprocess.PIPE, shell=False)
         output = process.stdout.decode("utf-8")
         lines = output.splitlines(keepends=True)
         file_sections: List[Tuple[Path, List[str]]] = []
@@ -183,6 +183,14 @@ def compute_semantic_weight_grouped(config: Configuration, file_group: FileGroup
             for file in files:
                 unsorted_ret.append((file, SemanticWeightModel(), LangElement('root', None, [])))
         else:
+            if ext not in config.validated_analyzers:
+                print(f"{ERROR} '{ext}' is not validated, the {LAUNCH} Launch command in `target`"
+                      f" did not complete successfully on the test file.")
+                print(f"{ERROR} This is likely not intended, therefore Mura will now exit.")
+                print(f"{ERROR} Please check the output of the {LAUNCH} Launch command and fix the issues"
+                      f" /OR/ "
+                      f"add the extension to `config.ignored_extensions` or via the `--ignored-extensions` flag.")
+                exit(1)
             unsorted_ret.extend(semantics.analyze(files))
 
     unsorted_ret.sort(key=lambda x: file_group.files.index(x[0]))
