@@ -143,10 +143,10 @@ def list_semantic_analyzers(config: Configuration):
                     test_file = Path("testfile." + fsi.name)
                     if test_file.exists():
                         info.append(f"{LAUNCH} Test file exists! Running it...")
-                        res = subprocess.run([*launch_command.split(), str(test_file), str(semantics_path / 'declarations.json')])
+                        res = subprocess.run([*launch_command.split(), str('../declarations.json'), str(test_file)], capture_output=True, text=True)
                         res.check_returncode()
                         info.append(f"{SUCCESS} Test file ran successfully!")
-                        config.validated_analyzers.append(fsi.name)
+                        config.validated_analyzers.append('.' + fsi.name)
                 except Exception as e:
                     info.append(f"{ERROR} Test file failed to run! {e}")
                     info.append(f"{ERROR} Likely, the necessary dependencies/runtime is not installed!")

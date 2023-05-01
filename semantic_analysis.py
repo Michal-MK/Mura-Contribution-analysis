@@ -111,7 +111,7 @@ class LangSemantics:
 
         file_names = [str(file) for file in files]
         args = [*self.tool.split(), str(self.lang_dir.parent / "declarations.json"), *file_names]
-        process = subprocess.run(args, check=True, cwd=self.lang_dir, stdout=subprocess.PIPE, shell=True)
+        process = subprocess.run(args, check=True, cwd=self.lang_dir, stdout=subprocess.PIPE, shell=False)
         output = process.stdout.decode("utf-8")
         lines = output.splitlines(keepends=True)
         file_sections: List[Tuple[Path, List[str]]] = []
