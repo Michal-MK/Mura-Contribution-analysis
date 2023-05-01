@@ -37,6 +37,7 @@ Install the requirements
 ```bash
 pip install -r requirements.txt
 ```
+Note: On linux distributions you may need to run `pip3 install -r requirements.txt` to execute the script.
 
 ### Running the project
 
