@@ -328,8 +328,8 @@ class CommitRange:
 
         outside_range = False
         for commit in starting_points:
-            if self.repo.commit(commit).committed_datetime < self.hist_commit.committed_datetime or \
-                    self.repo.commit(commit).committed_datetime > self.head_commit.committed_datetime:
+            if self.repo.commit(commit).committed_datetime.timestamp() < hist_date or \
+                    self.repo.commit(commit).committed_datetime.timestamp() > head_date:
                 # This commit is not in the range of the analysis
                 continue
             path = []
@@ -338,8 +338,8 @@ class CommitRange:
             while current is not None and current not in main_path and not outside_range:
                 path.append(current)
                 current = self.repo.commit(current).parents[0].hexsha
-                if self.repo.commit(current).committed_datetime < self.hist_commit.committed_datetime or \
-                        self.repo.commit(current).committed_datetime > self.head_commit.committed_datetime:
+                if self.repo.commit(current).committed_datetime.timestamp() < hist_date or \
+                        self.repo.commit(current).committed_datetime.timestamp() > head_date:
                     # This commit is not in the range of the analysis
                     outside_range = True
             path.append(current)

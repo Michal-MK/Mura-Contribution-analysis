@@ -128,7 +128,7 @@ class HistoryAnalyzerTest(unittest.TestCase):
 
         self.assertTrue(len(unmerged) == 2)
         self.assertTrue(unmerged[1][0] == 'branch2')
-        self.assertTrue(unmerged[0][1] == 'branch1 some-tag')
+        self.assertTrue(unmerged[0][0] == 'branch1 some-tag')
 
         # self.assertTrue(unmerged[1].head == 'a34e9dc8bc9ee55584120e40209ac97bb388fcc9')
         # self.assertTrue(unmerged[0].head == '689a14b3823fafbd6bb927b5409692bdb02eb96a')
@@ -136,8 +136,8 @@ class HistoryAnalyzerTest(unittest.TestCase):
         self.assertTrue('932ccb27444ebc67fb3e83e745072902f88ec82b' in unmerged[1][1])
         self.assertTrue('676ecb3fb829d166ad8594a54b4bd8ae4b503bd5' in unmerged[0][1])
 
-        self.assertTrue(unmerged[1][1][0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
-        self.assertTrue(unmerged[0][1][0] == 'b66cf3e24e6603527993578c4fea1b7f6eb322e1')
+        self.assertTrue(unmerged[1][1][0] == 'a34e9dc8bc9ee55584120e40209ac97bb388fcc9')
+        self.assertTrue(unmerged[0][1][0] == '689a14b3823fafbd6bb927b5409692bdb02eb96a')
 
         self.assertTrue(len(unmerged[1][1]) == 3)
         self.assertTrue(len(unmerged[0][1]) == 3)

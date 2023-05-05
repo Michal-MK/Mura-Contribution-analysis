@@ -1,3 +1,7 @@
+1.3.4
+- fix unmerged branch detection incorrectly handling end date overrides (the parameter passed into the function)
+- fix tests for unmerged branches
+
 1.3.3
 - add comments to source files
 
