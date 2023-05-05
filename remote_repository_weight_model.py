@@ -1,3 +1,7 @@
+'''
+This file holds data structures and methods for the remote repository weight configuration.
+'''
+
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
@@ -10,6 +14,11 @@ CACHE: Optional['RemoteRepositoryWeightModel'] = None
 
 
 class RemoteRepositoryWeightModel:
+    '''
+    Class responsible for holding the configuration of the remote repository weight model.
+    Calling `evaluate` with the appropriate parameters will display the weight of all Issues and PRs provided
+    according to the model.
+    '''
     def __init__(self):
         self.base_issue_weight = 0
         self.base_pr_weight = 0

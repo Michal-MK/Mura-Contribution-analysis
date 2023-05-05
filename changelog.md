@@ -1,3 +1,6 @@
+1.3.3
+- add comments to source files
+
 1.3.2
 - update README.md with more Linux instructions
 - display a message when invalid/no token is present for Git* providers instead of throwing

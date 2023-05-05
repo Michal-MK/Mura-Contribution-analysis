@@ -3,7 +3,6 @@ from typing import Any, TYPE_CHECKING
 
 from git import Repo
 
-import lib
 import repository_hooks
 from uni_chars import *
 
@@ -28,6 +27,14 @@ def parse_model_content(model: Any, file: Path) -> Any:
 
 
 def validate_repository(repository_path: str, config: 'Configuration') -> Repo:
+    '''
+    Validates the repository path and returns the repository object.
+    Remote repository is also validated if the config allows it.
+    This requires valid tokens!
+
+    :param repository_path: Path to the repository on the local file system
+    :param config: Configuration to obtain the remote repository access tokens
+    '''
     path = Path(repository_path)
     if not path.exists():
         raise FileNotFoundError(f"Path {path} does not exist")
@@ -44,7 +51,7 @@ def validate_repository(repository_path: str, config: 'Configuration') -> Repo:
 
         url = repo.remotes[config.default_remote_name].url
         remote = repository_hooks.parse_project(url, gitlab_access_token=config.gitlab_access_token,
-                                                     github_access_token=config.github_access_token)
+                                                github_access_token=config.github_access_token)
 
         print(f"{INFO} Remote repository found: {url} ({remote.__class__.__name__})")
 
@@ -56,8 +63,4 @@ def validate_repository(repository_path: str, config: 'Configuration') -> Repo:
 
         return repo
     except Exception as e:
-        raise ValueError(f"Path {path} is not a git repository") from e
-
-
-def validate_rules():
-    return None
+        raise ValueError(f"Path {path} is not a git repository, or remote repository failed to initialize") from e

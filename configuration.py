@@ -1,3 +1,6 @@
+'''
+File holding all non-weight configuration options for Mura.
+'''
 import os
 import subprocess
 import sys
@@ -12,7 +15,10 @@ from uni_chars import *
 
 
 class Configuration:
-    def __init__(self):
+    '''
+    Class holding all non-weight configuration options for Mura.
+    '''
+    def __init__(self) -> None:
         self.full_ownership_min_threshold = 0.8
         self.ownership_min_threshold = 0.2
         self.file_rule_violation_multiplier = 0.9
@@ -55,10 +61,16 @@ class Configuration:
 
     @property
     def use_sonarqube(self) -> bool:
+        '''
+        Whether to use SonarQube or not. SonarQube requires Docker to be installed.
+        '''
         return self._use_sonarqube
 
     @use_sonarqube.setter
-    def use_sonarqube(self, value: bool):
+    def use_sonarqube(self, value: bool) -> None:
+        '''
+        Sets whether to use SonarQube or not. SonarQube requires Docker to be installed.
+        '''
         print(f"{INFO} Setting SonarQube usage to {value}.")
         if not value:
             self._use_sonarqube = value
@@ -74,7 +86,11 @@ class Configuration:
             print(f"{ERROR} This is fatal!")
             raise e
 
-    def post_validate(self):
+    def post_validate(self) -> None:
+        '''
+        Performs post-validation of the configuration. Ensures that all required fields are set and no conflicting
+        options are set.
+        '''
         if self.use_sonarqube:
             if self.sonarqube_login == "":
                 raise Exception(f"{ERROR} SonarQube login is required!")
@@ -91,6 +107,13 @@ class Configuration:
 
     @staticmethod
     def load_from_file(config_path: Path, rules_path: Path, verbose=False) -> 'Configuration':
+        '''
+        Loads configuration and rule definitions from respective files.
+
+        :param config_path: Path to the configuration file.
+        :param rules_path: Path to the rule definition file.
+        :param verbose: Provide verbose output. Used for Jupiter Notebook.
+        '''
         ret = Configuration()
         if verbose:
             print(f"{INFO} Loading general configuration!")
@@ -122,8 +145,13 @@ class Configuration:
         return ret
 
 
-def list_semantic_analyzers(config: Configuration):
-    def dump(info: List[str]):
+def list_semantic_analyzers(config: Configuration) -> None:
+    '''
+    Lists all available semantic analyzers. Semantic analyzers are located in lang-semantics directory.
+
+    :param config: After validation, marks analyzers that are functional in the current environment
+    '''
+    def dump(info: List[str]) -> None:
         for line in info:
             print(line)
         print()
@@ -164,6 +192,9 @@ def list_semantic_analyzers(config: Configuration):
 
 
 def validate() -> 'Configuration':
+    '''
+    Validate and parse configuration files into a class representation.
+    '''
     config_path = Path(__file__).parent / "configuration_data" / "configuration.txt"
     rules_path = Path(__file__).parent / "configuration_data" / "rules.txt"
 
@@ -186,7 +217,10 @@ def validate() -> 'Configuration':
     return configuration
 
 
-def open_configuration_folder():
+def open_configuration_folder() -> None:
+    '''
+    Helper function to open the configuration folder using the platforms default file explorer.
+    '''
     config_path = Path(__file__).parent / "test" / "configuration_data"
     if sys.platform == "win32":
         # Let's all have a laugh: https://answers.microsoft.com/en-us/windows/forum/all/windows-11-22h2-explorerexe-command-line-switch-to/b0958474-6124-44c9-b01a-7e6952317848
@@ -194,7 +228,14 @@ def open_configuration_folder():
     else:
         os.system(f"xdg-open {config_path}")
 
-def start_sonar(config: Configuration):
+def start_sonar(config: Configuration) -> Tuple[Path, Path]:
+    '''
+    Starts a SonarQube server instance using Docker.
+
+    :param config: Configuration to obtain port and persistence information from.
+    '''
+
+    assert config._use_sonarqube, "SonarQube is not enabled in the configuration! This function should not be called!"
     client = docker.from_env()
     data_path = (Path("data") / "sonarqube_data").absolute()
     logs_path = (Path("data") / "sonarqube_logs").absolute()

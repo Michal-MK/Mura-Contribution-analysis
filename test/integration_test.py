@@ -7,7 +7,7 @@ import git
 from configuration import Configuration
 from history_analyzer import CommitRange
 from lib import get_tracked_files
-from mura import display_results
+from mura import main
 from semantic_analysis import compute_semantic_weight_grouped
 from environment_local import TWO_CONTRIB_REPO
 

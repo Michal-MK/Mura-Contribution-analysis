@@ -1,3 +1,7 @@
+'''
+File responsible for interacting with remote repositories.
+'''
+
 from __future__ import annotations
 
 import abc
@@ -19,8 +23,12 @@ DTF = "%Y-%m-%dT%H:%M:%S.%f%z"
 
 
 class Issue:
+    '''
+    Data class representing an issue.
+    '''
+
     def __init__(self, name: str, description: str, state: str, created_at: datetime.datetime,
-                 closed_at: Optional[datetime.datetime], author: str, closed_by: str, assigned_to: str, url:str):
+                 closed_at: Optional[datetime.datetime], author: str, closed_by: str, assigned_to: str, url: str):
         self.name = name
         self.description = description
         self.state = state
@@ -33,6 +41,10 @@ class Issue:
 
 
 class PR:
+    '''
+    Data class representing a pull request.
+    '''
+
     def __init__(self, name: str, description: str, created_at: datetime.datetime,
                  merge_status: str, merged_at: Optional[datetime.datetime], author: str,
                  merged_by: str, commit_shas: List[str], reviewers: List[str],
@@ -52,6 +64,10 @@ class PR:
 
 
 class RemoteRepository(abc.ABC):
+    '''
+    Abstract class representing a remote repository, such as GitHub or GitLab.
+    '''
+
     def __init__(self, project_path: str, access_token: str):
         self.name: str = ''
         self.path = project_path
@@ -209,6 +225,7 @@ class GithubRepository(RemoteRepository):
         self.members_cache = [x.name if x.name is not None else "" for x in self.project.get_contributors()]
         return self.members_cache
 
+
 class DummyRepository(RemoteRepository):
     def __init__(self):
         super().__init__("", "")
@@ -225,62 +242,15 @@ class DummyRepository(RemoteRepository):
     def members(self) -> List[str]:
         return []
 
+
 def parse_project(project: str, gitlab_access_token: str, github_access_token: str) -> RemoteRepository:
+    '''
+    Parses a project url and returns a concrete implementation of RemoteRepository for the given host.
+    Access tokens are required for GitLab and GitHub.
+    '''
     uri = urllib3.util.parse_url(project)
     if "gitlab" in uri.host:
         return GitLabRepository(uri.scheme + '://' + uri.host, uri.path, gitlab_access_token)
     if "github" in uri.host:
         return GithubRepository(uri.path, github_access_token)
     raise ValueError(f"{ERROR} Unknown host {uri.host}")
-
-
-def parse_projects(projects_path: Path, gitlab_access_token: str, github_access_token: str) -> List[RemoteRepository]:
-    projects = []
-    if not projects_path.exists():
-        raise FileNotFoundError(f"Projects file not found at {projects_path.absolute()}")
-    with open(projects_path, 'r') as f:
-        for line in f.readlines():
-            if not line.strip() or line.startswith('#'):
-                continue
-            projects.append(line.strip())
-    repos: List[RemoteRepository] = []
-    for project in projects:
-        repo = parse_project(project, gitlab_access_token, github_access_token)
-        repos.append(repo)
-    return repos
-
-
-if __name__ == '__main__':
-    gh = github.Github(os.environ['GITHUB_ACCESS_TOKEN'])
-    repo = gh.get_repo('Slinta/MetinSpeechToData')
-    issues = repo.get_issues()
-    for issue in issues:
-        iss = Issue(name=issue.title,
-                    description=issue.body,
-                    created_at=issue.created_at,
-                    closed_at=issue.closed_at,
-                    state=issue.state,
-                    closed_by=issue.closed_by.login if issue.closed_by is not None else '',
-                    author=issue.user.login,
-                    assigned_to=issue.assignee.login if issue.assignee is not None else '',
-                    url=issue.html_url)
-        print(iss)
-    prs = repo.get_pulls()
-    for pr in prs:
-        preq = PR(name=pr.title,
-                  description=pr.body,
-                  created_at=pr.created_at,
-                  merge_status=pr.mergeable_state,
-                  merged_at=pr.merged_at,
-                  merged_by=pr.merged_by.login if pr.merged_by is not None else '',
-                  author=pr.user.login,
-                  commit_shas=[c.sha for c in pr.get_commits()],
-                  reviewers=[r.login for r in pr.get_review_requests()[0]],
-                  target_branch=pr.base.ref,
-                  source_branch=pr.head.ref,
-                  url=pr.html_url)
-        print(preq)
-        print(pr)
-    members = repo.get_contributors()
-
-    pass

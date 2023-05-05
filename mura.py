@@ -1,3 +1,7 @@
+'''
+Driver script for the Jupiter notebook
+Aggregates the results of the analysis and generates the plots
+'''
 import argparse
 import math
 import os
@@ -40,8 +44,8 @@ ContributorWeight = Dict[Contributor, float]
 GlobalRuleWeightMultiplier = Dict[Contributor, float]
 
 
-def build_tree(triples):
-    tree = {}
+def build_tree(triples: List[Tuple[Path, float, Contributor]]) -> Dict[Any, Any]:
+    tree: Dict[Any, Any] = {}
     for triple in triples:
         current = tree
         for part in triple[0].parts:
@@ -52,12 +56,12 @@ def build_tree(triples):
     return tree
 
 
-def calculate_ownership(tree, ownership_cache=None):
+def calculate_ownership(tree, ownership_cache=None) -> Dict[Contributor, float]:
     if ownership_cache is None:
         ownership_cache = {}
     if all(isinstance(value, float) for value in tree.values()):
         return tree
-    ownership = defaultdict(float)
+    ownership: Dict[Contributor, float] = defaultdict(float)
     count = 0
     for value in tree.values():
         if isinstance(value, dict):
@@ -72,13 +76,20 @@ def calculate_ownership(tree, ownership_cache=None):
 
 
 def get_owner(ownership: Dict[Contributor, List[ContributionDistribution]], file: Path) -> Optional[Contributor]:
+    '''
+    Reverse lookup for the owner of a file
+    '''
+
     for k, v in ownership.items():
         if file in map(lambda x: x.file, v):
             return k
     return None
 
 
-def print_tree(tree, level=0, prefix='', ownership_cache=None):
+def print_tree(tree: Dict[Any, Any], level=0, prefix='', ownership_cache=Optional[Dict[Contributor, float]]) -> None:
+    '''
+    Prints a tree structure of the repository
+    '''
     if ownership_cache is None:
         ownership_cache = {}
     for i, (name, value) in enumerate(tree.items()):
@@ -90,7 +101,8 @@ def print_tree(tree, level=0, prefix='', ownership_cache=None):
             new_prefix = prefix + '│   '
         if isinstance(value, dict):
             if all(isinstance(v, float) for v in value.values()):
-                owners_str = ', '.join([f'{owner.name}: {value * 100:.0f}%' for owner, value in value.items() if owner.name != '?'])
+                owners_str = ', '.join(
+                    [f'{owner.name}: {value * 100:.0f}%' for owner, value in value.items() if owner.name != '?'])
                 print(f'{prefix}{connector}{name} {CONTRIBUTOR} [{owners_str}]')
             else:
                 sub_ownerships = [calculate_ownership(v, ownership_cache) for v in value.values() if
@@ -107,6 +119,10 @@ def print_tree(tree, level=0, prefix='', ownership_cache=None):
 
 def plot_commits(commits: List[str], commit_range: CommitRange, contributors: List[Contributor],
                  force_x_axis_dense_labels=False, output_path: Optional[Path] = None) -> None:
+    '''
+    Plotting function for commit distribution
+    '''
+
     commit_data = defaultdict(list)
     min_date = datetime.max.replace(tzinfo=timezone.utc)
     max_date = datetime.min.replace(tzinfo=timezone.utc)
@@ -145,6 +161,11 @@ def plot_commits(commits: List[str], commit_range: CommitRange, contributors: Li
         plt.show()
 
 
+'''
+Helper functions for output formatting
+'''
+
+
 def separator() -> None:
     print()
     print("============================================")
@@ -157,6 +178,10 @@ def header(text: str) -> None:
 
 
 def display_contributor_info(commit_range: CommitRange, config: Configuration) -> List[Contributor]:
+    '''
+    Driver function for contributor overview
+    '''
+
     contributors = get_contributors(config, commit_range=commit_range)
     header(f"{CONTRIBUTOR} Contributors:")
 
@@ -171,6 +196,10 @@ def display_contributor_info(commit_range: CommitRange, config: Configuration) -
 
 def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contributor]) \
         -> Tuple[Dict[Contributor, int], List[Tuple[Contributor, int, int]]]:
+    '''
+    Driver function for commit overview
+    '''
+
     header(f"{COMMIT} Total commits: {len(commit_range.compute_path())}")
 
     commit_distribution: Dict[Contributor, int] = defaultdict(lambda: 0)
@@ -206,6 +235,10 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
 
 def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int, int]],
                               output_path: Optional[Path] = None) -> Any:
+    '''
+    Plotting function for insertions and deletions
+    '''
+
     insertions_deletions.sort(key=lambda x: x[1], reverse=True)
 
     contributor_names = [x[0].name for x in insertions_deletions]
@@ -234,6 +267,10 @@ def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int,
 
 def percentage_info(analysis_res: AnalysisResult, contributors: List[Contributor], config: Configuration, repo: Repo) \
         -> Tuple[Percentage, Dict[Contributor, List[ContributionDistribution]]]:
+    '''
+    Driver code for calculating and displaying percentage information.
+    '''
+
     header(f'{PERCENTAGE} Percentage of tracked files:')
 
     percentage = calculate_percentage(contributors, analysis_res)
@@ -257,6 +294,10 @@ def percentage_info(analysis_res: AnalysisResult, contributors: List[Contributor
 
 
 def display_dir_tree(percentage: Percentage, repo: Repo):
+    '''
+    Driver code for ownership tree rendering
+    '''
+
     header(f"{DIRECTORY_TREE} Dir Tree with ownership:")
 
     triples = []
@@ -271,6 +312,9 @@ def display_dir_tree(percentage: Percentage, repo: Repo):
 
 def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]],
               contributors: List[Contributor], remote_project: RemoteRepository) -> GlobalRuleWeightMultiplier:
+    '''
+    Driver code for Rule based analysis
+    '''
     header(f"{RULES} Rules: ")
 
     ret: GlobalRuleWeightMultiplier = defaultdict(lambda: 1.0)
@@ -357,6 +401,11 @@ def local_syntax_analysis(config: Configuration, grouped_files: List[FileGroup])
 
 def start_sonar_analysis(config: Configuration, repository_path: str) \
         -> Tuple[Optional[str], Optional[Container]]:
+    '''
+    Starts the SonarQube server instance and the analysis container with the given repository.
+    In case the container fails to start, None is returned for both project-key and container.
+    '''
+
     if not config.use_sonarqube:
         print(f"{INFO} Syntax analysis uses SonarQube and 'config.use_sonarqube = False'. Skipping syntax analysis.")
         return None, None
@@ -415,6 +464,8 @@ def start_sonar_analysis(config: Configuration, repository_path: str) \
 
     print()
     print(f"{INFO} SonarQube 'sonar-scanner-cli' is performing analysis in the background...")
+
+    # TODO SonarQube Community Edition does not support branch analysis...
     # try:
     #     commit_range.repo.git.execute(['git', 'checkout', '-b', 'sonar-analysis-head', commit_range.head])
     # except GitCommandError:
@@ -433,7 +484,7 @@ def start_sonar_analysis(config: Configuration, repository_path: str) \
                                      f"-Dsonar.login={config.sonarqube_login} "
                                      f"-Dsonar.password={config.sonarqube_password} "
                                      f"-Dsonar.java.binaries=**/target"
-               #                     f"-Dsonar.branch.name=sonar-analysis-head" TODO not available in standard edition
+               #                     f"-Dsonar.branch.name=sonar-analysis-head" TODO not available in Community Edition
                }
         container = client.containers.run("sonarsource/sonar-scanner-cli:4.8",
                                           environment=env,
@@ -452,6 +503,10 @@ def start_sonar_analysis(config: Configuration, repository_path: str) \
 def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[ContributionDistribution]],
                       local_syntax: Dict[Path, FileWeight], repo: Repo, file_maturity_score: Dict[Path, float],
                       n_extreme_files: int = 5) -> ContributorWeight:
+    '''
+    Driver function for local syntax analysis.
+    '''
+
     header(f"{SYNTAX} Local Syntax Analysis")
 
     assert n_extreme_files >= 0, "n_extreme_files must be non-negative."
@@ -514,6 +569,10 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
 def sonar_info(config: Configuration, contributors: List[Contributor], repo: Repo,
                file_ownership: Dict[Contributor, List[ContributionDistribution]],
                project_key: Optional[str]) -> ContributorWeight:
+    '''
+    Driver function for SonarQube analysis.
+    '''
+
     header(f"{SYNTAX} Syntax + Semantics using SonarQube:")
 
     if not config.use_sonarqube:
@@ -685,6 +744,10 @@ def semantic_info(tracked_files: List[FileGroup],
                   semantics: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
                   file_maturity_score: Dict[Path, float]) \
         -> ContributorWeight:
+    '''
+    Driver function for the semantic analysis.
+    '''
+
     header(f"{SEMANTICS} Semantics:")
 
     contributor_weight: ContributorWeight = defaultdict(lambda: 0.0)
@@ -726,6 +789,10 @@ def semantic_info(tracked_files: List[FileGroup],
 
 def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, contributors: List[Contributor]) \
         -> Tuple[RemoteRepository, ContributorWeight]:
+    '''
+    Driver function for remote repository analysis.
+    '''
+
     header(f"{REMOTE_REPOSITORY} Remote repository management:")
 
     if config.ignore_remote_repo:
@@ -821,6 +888,9 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
 
 def file_statistics_info(commit_range: CommitRange, contributors: List[Contributor]) \
         -> Dict[Contributor, FlaggedFiles]:
+    '''
+    Driver function for file statistics (Additions, Deletions, Modifications, Renames etc.)
+    '''
     file_flags = get_flagged_files_by_contributor(commit_range, contributors)
     for contributor in contributors:
         if contributor.name == '?':
@@ -832,6 +902,9 @@ def file_statistics_info(commit_range: CommitRange, contributors: List[Contribut
 
 
 def get_all_comments(element: LangElement) -> List[LangElement]:
+    '''
+    Recursively get all comments from a language element - usually a file.
+    '''
     comments = []
     for child in element.children:
         if child.kind == 'comment':
@@ -844,7 +917,11 @@ def get_all_comments(element: LangElement) -> List[LangElement]:
 def constructs_info(tracked_files: List[FileGroup],
                     ownership: Dict[Contributor, List[ContributionDistribution]],
                     semantic_analysis_grouped_result: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]]):
+    '''
+    Driver function for language constructs analysis.
+    '''
     header(f"{SEMANTICS} Constructs:")
+
     user_constructs: Dict[Contributor, Dict[str, int]] = defaultdict(lambda: defaultdict(lambda: 0))
     for i in range(len(tracked_files)):
         file_group = tracked_files[i]
@@ -872,6 +949,9 @@ def lines_blanks_comments_info(repository: Repo,
                                semantic_analysis_res: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
                                tracked_files: List[FileGroup],
                                n_extreme_files: int = 5):
+    '''
+    Driver function for lines, blanks and comments info
+    '''
     header(f"{BLANKS_COMMENTS} Blanks and comments:")
 
     assert n_extreme_files >= 0, 'n_extreme_files must be a non-negative number!'
@@ -941,6 +1021,13 @@ def lines_blanks_comments_info(repository: Repo,
 
 
 def estimate_hours(dates: List[datetime], max_commit_diff: int = 120, first_commit_addition: int = 120) -> int:
+    '''
+    Estimates hours spent on coding based on commit dates, the algorithm is based on git-hours project
+    https://github.com/kimmobrunfeldt/git-hours
+    :param dates: List of commit dates
+    :param max_commit_diff: Maximum time difference between commits to be counted as single coding session
+    :param first_commit_addition: Time added to first commit of a session
+    '''
     if len(dates) < 2:
         return 0
 
@@ -966,6 +1053,9 @@ def estimate_hours(dates: List[datetime], max_commit_diff: int = 120, first_comm
 
 
 def hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Contributor, Tuple[int, int]]:
+    '''
+    Driver function for hour estimates
+    '''
     header(f"{TIME} Hour estimates:")
 
     commits = [x for x in repository.iter_commits()]
@@ -1001,6 +1091,13 @@ def gaussian(config: Configuration, input_hours: float, hour_estimate: float):
 
 def gaussian_weights(config: Configuration, hour_estimate: float,
                      hours: Dict[Contributor, Tuple[int, int]]) -> ContributorWeight:
+    '''
+    Computes the estimated weight from the given hours of work based on Normal distribution.
+
+    :param config: Configuration from which to read the base hour match weight
+    :param hour_estimate: The expected time put into the project in hours
+    :param hours: Estimates as computed from the git-hours algorithm
+    '''
     ret: Dict[Contributor, float] = defaultdict(lambda: 0.0)
     header(f"{WEIGHT} Gaussian weights:")
     for contributor, commits_hours in hours.items():
@@ -1025,6 +1122,9 @@ def summary_info(contributors: List[Contributor],
                  global_rule_weight_multiplier: GlobalRuleWeightMultiplier,
                  hours: ContributorWeight,
                  file_history_multipliers: Dict[Path, float]) -> None:
+    '''
+    Prints summary of all the weights and multipliers
+    '''
     sums: Dict[Contributor, float] = defaultdict(lambda: 0.0)
 
     def print_section(section: ContributorWeight, add=True):
@@ -1066,13 +1166,6 @@ def summary_info(contributors: List[Contributor],
     print(f"{WEIGHT}{WARN} Weight multiplier for unfulfilled {RULES} Rules:")
     print_section(global_rule_weight_multiplier, add=False)
 
-    # separator()
-    # print(f"{WEIGHT}{WARN} Total multiplier for file history:")
-    # print(f"{INFO} This multiplier is applied to: {SEMANTICS} Semantics and {SYNTAX} Syntax, "
-    #       f"the above results are WITH the multiplier.")
-    # for path, multiplier in [x for x in file_history_multipliers.items() if x[1] != 1.0]:
-    #     print(f" -> {path}: {multiplier}")
-
     separator()
     print(f"{WEIGHT} Total weight per contributor:")
 
@@ -1088,10 +1181,11 @@ def summary_info(contributors: List[Contributor],
 
 
 # https://stackoverflow.com/a/8384788
-def path_leaf(path):
+def path_leaf(path: str):
     import ntpath
     head, tail = ntpath.split(path)
     return tail or ntpath.basename(head)
+
 
 def new_file(base_path: Optional[Path], file: str) -> Optional[Path]:
     if not base_path:
@@ -1099,7 +1193,12 @@ def new_file(base_path: Optional[Path], file: str) -> Optional[Path]:
     return Path(str(base_path) + file)
 
 
-def display_results(arguments: argparse.Namespace) -> None:
+def main(arguments: argparse.Namespace) -> None:
+    '''
+    The driver function for Mura CLI.
+
+    :param arguments: Arguments passed to the CLI, parsed by `argparse`.
+    '''
     import fs_access as file_system
 
     config = configuration.validate()
@@ -1124,7 +1223,6 @@ def display_results(arguments: argparse.Namespace) -> None:
 
     repository = file_system.validate_repository(repository_path, config)
     commit_range = CommitRange(repository, arguments.head, arguments.root, verbose=True)
-
 
     config.anonymous_mode = arguments.anonymous_mode
 
@@ -1184,12 +1282,12 @@ def display_results(arguments: argparse.Namespace) -> None:
                  global_rule_weight_multiplier, hour_weights, file_history_multiplier)
 
 
-def contributor_pairs(contributor_map):
-    key, value = contributor_map.split(':')
-    return key, value
-
-
 if __name__ == '__main__':
+    def contributor_pairs(contributor_map):
+        key, value = contributor_map.split(':')
+        return key, value
+
+
     parser = argparse.ArgumentParser(description='MURA - MOTH | Repository Analyzer')
     parser.add_argument('-r', '--repo', type=str, required=True,
                         help='A string representing a path to a repository')
@@ -1235,7 +1333,7 @@ if __name__ == '__main__':
             with open(args.file, 'w', encoding='UTF-8') as f:
                 with redirect_stdout(f):
                     try:
-                        display_results(args)
+                        main(args)
                     except Exception as inner:
                         header("")
                         print(f"{ERROR} MURA failed to run, please check the following error:")
@@ -1245,4 +1343,4 @@ if __name__ == '__main__':
             print(f"Failed to write to file: '{args.file}'")
             sys.exit(1)
     else:
-        display_results(args)
+        main(args)

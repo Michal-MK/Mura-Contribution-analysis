@@ -1,3 +1,6 @@
+'''
+File containing code for syntactic analysis of files.
+'''
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -15,9 +18,13 @@ loaded_weight_maps: Dict[str, 'SyntacticWeightModel'] = {}
 
 
 class BlankLineHandler:
+    '''
+    A counter for consecutive blank lines.
+    The first blank line is worth the full weight, the second is worth half, and the rest are considered filler content.
+    '''
     __slots__ = ["count"]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.count = 0
 
     def next(self) -> float:
@@ -34,7 +41,7 @@ class BlankLineHandler:
 
 
 class FileWeight:
-    def __init__(self, file: Path, file_weight: float, individual_line_weights: List[float]):
+    def __init__(self, file: Path, file_weight: float, individual_line_weights: List[float]) -> None:
         self.file = file
         self.file_weight = file_weight
         self.line_weights = individual_line_weights
@@ -42,11 +49,11 @@ class FileWeight:
         self.semantic_structure: Optional[LangElement] = None
 
     @property
-    def total_line_weight(self):
+    def total_line_weight(self) -> float:
         return sum(self.line_weights)
 
     @property
-    def syntactic_weight(self):
+    def syntactic_weight(self) -> float:
         return self.file_weight
 
     @property
@@ -55,24 +62,24 @@ class FileWeight:
         return self.syntactic_weight + self.semantic_weight
 
     @property
-    def semantic_weight(self):
+    def semantic_weight(self) -> float:
         assert self.weight_model is not None, "weight_model was not assigned yet! Cannot compute semantic_weight!"
         return self.semantic_structure.compute_weight(self.weight_model)
 
     @property
-    def average_line_weight(self):
+    def average_line_weight(self) -> float:
         return self.total_line_weight / self.num_lines
 
     @property
-    def num_lines(self):
+    def num_lines(self) -> int:
         return len(self.line_weights)
 
 
 def load_weight_map(file_path: Path) -> SyntacticWeightModel:
     """
-    Load the weight map for a file
+    Load the syntactic weight map for a file.
+
     :param file_path: The file to load the weight map for
-    :return: The weight map
     """
     suffix = file_path.suffix.lstrip('.')
     if suffix not in loaded_weight_maps:
@@ -88,6 +95,11 @@ def load_weight_map(file_path: Path) -> SyntacticWeightModel:
 
 
 def has_weight_map(file: Path) -> bool:
+    '''
+    Check if the file has a weight map by analyzing its suffix.
+
+    :param file: Full path to the file
+    '''
     if file.is_dir():
         return False
     suffix = file.suffix.lstrip('.')
@@ -96,8 +108,9 @@ def has_weight_map(file: Path) -> bool:
 
 def compute_syntactic_weight(file: Path, config: Configuration) -> Optional[FileWeight]:
     """
-    Compute the weight of a file
-    :param file: full path to the file
+    Compute the syntactic weight of a file.
+
+    :param file: Full path to the file
     :return: The weight of the file based on its contents
     """
     try:
@@ -110,24 +123,39 @@ def compute_syntactic_weight(file: Path, config: Configuration) -> Optional[File
 
 
 def compute_lines_weight(file: Path, lines: List[str], config: Configuration) -> List[float]:
+    '''
+    Compute the weight of each line in a file.
+
+    :param file: The original file path
+    :param lines: Content of the file 'file'
+    :param config: Configuration to obtain constraints from
+    '''
     strip_chars = ' \t\r\n'
     weight_map = load_weight_map(file)
     blank_line_handler = BlankLineHandler()
-    ret = []
+    line_weights = []
     for line in lines:
         line_stripped = line.strip(strip_chars)
         if line_stripped == '':
-            ret.append(blank_line_handler.next())
+            line_weights.append(blank_line_handler.next())
             continue
         blank_line_handler.clear()
         if len(line) >= config.max_line_length:
-            ret.append(config.over_max_line_length_weight)
+            line_weights.append(config.over_max_line_length_weight)
         weight = weight_map.get_weight(line, line_stripped)
-        ret.append(weight)
-    return ret
+        line_weights.append(weight)
+    return line_weights
 
 
 def compute_file_weight(file: Path, lines: List[str], config: Configuration) -> Tuple[float, List[float]]:
+    '''
+    Compute the weight of a file. File weight is the sum of all line weights divided by the number of lines.
+    The resulting ratio is then applied to the base file weight.
+
+    :param file: Full path to the file
+    :param lines: Content of the file 'file'
+    :param config: Configuration to obtain constraints from
+    '''
     line_weights = compute_lines_weight(file, lines, config)
     weight_sum = sum(line_weights)
     ratio = weight_sum / len(line_weights)
@@ -135,6 +163,12 @@ def compute_file_weight(file: Path, lines: List[str], config: Configuration) -> 
 
 
 def get_complete_files(ownerships: Dict[Path, Ownership], threshold: float) -> Dict[Path, datetime]:
+    '''
+    Get the files that are considered complete from a development standpoint based on the threshold.
+
+    :param ownerships: File ownership mapping
+    :param threshold: Ratio of new lines over existing lines that must be exceeded to consider a file incomplete.
+    '''
     complete_files: Dict[Path, datetime] = {}
     for path, ownership in ownerships.items():
         prev_size = None
@@ -160,6 +194,13 @@ def get_complete_files(ownerships: Dict[Path, Ownership], threshold: float) -> D
 
 
 def group_by_common_suffix(paths: List[Path]) -> Dict[str, List[Path]]:
+    '''
+    Group a list of paths by their common suffix.
+    This does not include the file extension! Common suffix is commonly used to group related files.
+    E.g. AddUserDTO.java and UpdateUserDTO.java will be grouped by 'UserDTO'.
+
+    :param paths: List of paths to group
+    '''
     result = defaultdict(list)
     for path1 in paths:
         stem1 = path1.stem
@@ -171,8 +212,8 @@ def group_by_common_suffix(paths: List[Path]) -> Dict[str, List[Path]]:
             min_len = min(len(stem1), len(stem2))
             common_suffix = ''
             for i in range(min_len):
-                char = stem1[-i-1]
-                if stem2[-i-1] == char:
+                char = stem1[-i - 1]
+                if stem2[-i - 1] == char:
                     common_suffix = char + common_suffix
                 else:
                     break
@@ -181,7 +222,13 @@ def group_by_common_suffix(paths: List[Path]) -> Dict[str, List[Path]]:
         result[max_common_suffix].append(path1)
     return dict(result)
 
+
 def convert_file_groups(file_groups: List[FileGroup]) -> List[Path]:
+    '''
+    Helper function to convert a list of file groups to a list of files. (Effectively flattening the list)
+
+    :param file_groups: List of file groups to convert
+    '''
     result = []
     for file_group in file_groups:
         result.extend(file_group.files)
@@ -190,6 +237,15 @@ def convert_file_groups(file_groups: List[FileGroup]) -> List[Path]:
 
 def assign_scores(file_groups: List[FileGroup], history_analysis: Dict[Path, Ownership], config: Configuration) \
         -> Dict[Path, float]:
+    '''
+    Assign a multiplier to each file based on when the file appeared in the repository.
+    Scores range from 1.0 down to 0.5 based on the constraints in 'config'
+
+    :param file_groups: List of all grouped files in the repository
+    :param history_analysis: File ownership mapping
+    :param config: Configuration to obtain constraints from
+    '''
+
     def sort_key(path: Path) -> datetime:
         ret = complete_files.get(path, None)
         if ret is not None:
@@ -206,13 +262,7 @@ def assign_scores(file_groups: List[FileGroup], history_analysis: Dict[Path, Own
             complete_files[path] = date.replace(tzinfo=timezone.utc)
     result = {}
     for suffix, paths in grouped_files.items():
-        try:
-            sorted_paths = sorted(paths, key=sort_key)
-        except Exception as e:
-            pls = []
-            for path in paths:
-                pls.append(sort_key(path))
-            pass
+        sorted_paths = sorted(paths, key=sort_key)
         current_first_relevant_occurrence = sort_key(sorted_paths[0])
         existing_files = 0
         increase_past_dates = []
@@ -222,7 +272,8 @@ def assign_scores(file_groups: List[FileGroup], history_analysis: Dict[Path, Own
             # handle self
             if current_first_relevant_occurrence == sort_key(path):
                 result[path] = 1.0
-                increase_past_dates.append(current_first_relevant_occurrence + timedelta(days=config.num_days_grace_period))
+                next_increase = current_first_relevant_occurrence + timedelta(days=config.num_days_grace_period)
+                increase_past_dates.append(next_increase)
                 relevant_occurrences.append(current_first_relevant_occurrence)
                 continue
 
@@ -236,14 +287,15 @@ def assign_scores(file_groups: List[FileGroup], history_analysis: Dict[Path, Own
             increase = 0
 
             if other_file_completion_date - timedelta(days=config.num_days_grace_period) \
-                > current_first_relevant_occurrence:
+                    > current_first_relevant_occurrence:
                 current_first_relevant_occurrence = other_file_completion_date
-                increase_past_dates.append(current_first_relevant_occurrence + timedelta(days=config.num_days_grace_period))
+                next_increase = current_first_relevant_occurrence + timedelta(days=config.num_days_grace_period)
+                increase_past_dates.append(next_increase)
                 relevant_occurrences.append(current_first_relevant_occurrence)
             else:
-                increase_past_dates.append(current_first_relevant_occurrence + timedelta(days=config.num_days_grace_period))
+                next_increase = current_first_relevant_occurrence + timedelta(days=config.num_days_grace_period)
+                increase_past_dates.append(next_increase)
                 relevant_occurrences.append(other_file_completion_date)
-
 
             score = max(1 - existing_files * 0.1, 0.5)
 

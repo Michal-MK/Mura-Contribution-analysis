@@ -1,3 +1,6 @@
+'''
+File containing code for Git history analysis.
+'''
 import copy
 import datetime
 import re
@@ -30,6 +33,10 @@ CONFLICT_B_NAME: re.Pattern = re.compile(r"\+\+\+ b/(.*)\s")
 
 
 class OwnershipHistory:
+    '''
+    Class representing the ownership history of a file at a given commit.
+    '''
+
     def __init__(self, commit: str, content: List['LineMetadata'], lines_changed: int):
         self.commit = commit
         self.content = content
@@ -43,6 +50,10 @@ class OwnershipHistory:
 
 
 class LineMetadata:
+    '''
+    Class representing the metadata of a line in a file.
+    '''
+
     def __init__(self, author: str, content: str, change_date: datetime.datetime):
         self.author = author
         self.content = content
@@ -50,6 +61,10 @@ class LineMetadata:
 
     @property
     def is_blank(self):
+        '''
+        Helper property to check if the line is blank (or contains only whitespace).
+        :return:
+        '''
         return self.content == '' or self.content.strip() == ''
 
     def __str__(self):
@@ -59,17 +74,13 @@ class LineMetadata:
         return self.__str__()
 
 
-class CommitHistory:
-    def __init__(self, name: str, path: List[str]):
-        self.name = name
-        self.path = path
-
-    @property
-    def head(self) -> str:
-        return self.path[-1] if len(self.path) > 0 else ''
-
-
 class CommitRange:
+    '''
+    Class representing a range of commits.
+    From the first commit to the last commit a direct path is computed.
+    Any commits not directly on the path are ignored.
+    '''
+
     def __init__(self, repo: Repo, head: str, hist: str, verbose=False):
         self.head = head
         self.hist = hist
@@ -142,6 +153,7 @@ class CommitRange:
     def compute_path(self, include_merge_commits=False) -> Deque[str]:
         """
         Compute the path from <current_commit_hash> to <historical_commit_hash> in the <repo>
+
         :return: A list of commit hashes sorted from <current_commit_hash> to <historical_commit_hash>
         """
         c_range = f"{self.head}...{self.hist}"
@@ -156,10 +168,10 @@ class CommitRange:
 
     def checkout_file_from(self, commit_hash: str, file_name: str) -> str:
         """
-        Checkout the file <file_name> from the parent of the commit with the hash <commit_hash>
-        :param commit_hash:
-        :param file_name:
-        :return:
+        Obtain the content of a file at a given commit hash.
+
+        :param commit_hash: The hash of the commit to checkout the file from
+        :param file_name: The name of the file to checkout (relative to the repository root)
         """
         result = self.repo.git.execute(['git', 'show', f'{commit_hash}:{str(file_name)}'])
         assert isinstance(result, str)
@@ -168,6 +180,10 @@ class CommitRange:
     def populate_previously_unseen_file(self, config: Optional[Configuration], change: 'Change', commit_hash: str,
                                         file_name: Path,
                                         ret: Dict[Path, 'Ownership'], commit_date: datetime.datetime) -> None:
+        '''
+        Populate a previously unseen file with the content of the file at the previous commit.
+        This situation can happen when the analysis starts from a commit that is not the first commit in the repository.
+        '''
         file_path = posix_repo_p(str(file_name), self.repo)
         # Obtain the previous version of the file as a base
         content = self.checkout_file_from(commit_hash, file_path)
@@ -179,9 +195,7 @@ class CommitRange:
 
     def analyze(self, config: Optional[Configuration] = None, verbose=False) -> AnalysisResult:
         """
-        Analyze the repository <repo> from the commit with the hash <historical_commit_hash> to the commit with the hash
-        <current_commit_hash>
-        :return:
+        Analyze the repository, providing a list of files and their ownership.
         """
         path = self.compute_path()
 
@@ -203,7 +217,8 @@ class CommitRange:
                             ret[file_name].file = file_name
                             del ret[change.previous_name]
                         else:
-                            self.populate_previously_unseen_file(config, change, commit_hash, file_name, ret, commit_date)
+                            self.populate_previously_unseen_file(config, change, commit_hash, file_name, ret,
+                                                                 commit_date)
                         ret[file_name].apply_change(change.hunks, commit_hash, self.repo, change.author, commit_date)
                     elif change.hunks and change.hunks[0].mode == 'A':
                         ret[file_name] = Ownership(file_name, change.hunks[0].change_end, change.hunks[0].content,
@@ -215,7 +230,8 @@ class CommitRange:
                             ret[file_name].file = file_name
                             del ret[change.previous_name]
                         else:
-                            self.populate_previously_unseen_file(config, change, commit_hash, file_name, ret, commit_date)
+                            self.populate_previously_unseen_file(config, change, commit_hash, file_name, ret,
+                                                                 commit_date)
                     elif not change.hunks:
                         # This is a binary file or empty file
                         ret[file_name] = Ownership(file_name, -1, '', commit_date, commit_hash, change.author)
@@ -278,9 +294,11 @@ class CommitRange:
 
         return ret
 
-    def find_unmerged_branches(self, end_date: Optional[float] = None) -> List[Tuple[str,List[str]]]:
+    def find_unmerged_branches(self, end_date: Optional[float] = None) -> List[Tuple[str, List[str]]]:
         """
-        Find all unmerged branches in the repository <repo>
+        Find all unmerged branches in the repository in the commit range dates,
+        The end date many be overriden by the optional parameter end_date
+
         :return: A list of all unmerged branches
         """
         main_path = self.compute_path(include_merge_commits=True)
@@ -330,6 +348,9 @@ class CommitRange:
         return ret
 
     def unmerged_commits_info(self, repository: Repo, config: Configuration, contributors: List[Contributor]) -> None:
+        '''
+        Provide a visual representation of the unmerged branches in the repository
+        '''
         end_date = (self.head_commit.committed_datetime + timedelta(days=1)).timestamp()
         unmerged_content = self.find_unmerged_branches(end_date)
         for branch, commits in unmerged_content:
@@ -355,6 +376,10 @@ class CommitRange:
 
 
 class FileSection:
+    '''
+    A section of a file that was changed in a commit, represents a hunk
+    '''
+
     def __init__(self, prev_start: int, prev_len: int, change_start: int, change_len: int,
                  content: str, prev_file_hexsha: bytes, mode: Optional[str]):
         self.prev_start = prev_start
@@ -375,6 +400,10 @@ class FileSection:
 
 
 class Change:
+    '''
+    A collection of hunks that were made to a file in a commit
+    '''
+
     def __init__(self, author: str) -> None:
         self.hunks: List[FileSection] = []
         self.author = author
@@ -389,6 +418,10 @@ class Change:
 
 
 class Ownership:
+    '''
+    Represents the ownership of a file at a given point in time along with the changes that were made to it the past
+    '''
+
     def __init__(self, file: Path, init_line_count: int, initial_content: str, first_date: datetime.datetime,
                  commit_hash: str, author: str = '') -> None:
         self.file = file
@@ -413,16 +446,27 @@ class Ownership:
         self.history[commit_hash] = OwnershipHistory(commit_hash, copy.deepcopy(self.changes), init_line_count)
 
     @property
-    def content(self):
+    def content(self) -> str:
+        '''
+        Get the current content of the file, from an analysis perspective, this is the final state of the file.
+        '''
         return ''.join(map(lambda x: x.content, self.changes))
 
-    def delete(self, commit_hash: str):
+    def delete(self, commit_hash: str) -> None:
+        '''
+        Mark the file as deleted, the information will be kept in the history in case the file is added again
+        '''
         self.history[commit_hash] = OwnershipHistory(commit_hash, copy.deepcopy(self.changes), self.line_count)
         self.changes = []
         self._line_count = 0
         self.exists = False
 
     def fix_file(self, repo: Repo, commit_hash: str, date: datetime.datetime) -> None:
+        '''
+        In case direct analysis of hunks fails, this function will try to fix the current state of the file by
+        parsing the output of git blame.
+        This approach is not as fast as the direct hunk analysis, but is reliable.
+        '''
         blame_res = repo.blame(commit_hash, posix_repo_p(str(self.file), repo))
         assert blame_res is not None
         self.changes = []
@@ -436,6 +480,10 @@ class Ownership:
 
     def apply_change(self, hunks: List[FileSection], commit_hash: str, repo: Repo,
                      author: AuthorName, date: datetime.datetime) -> None:
+        '''
+        Record the changes made to the file in the current commit
+        '''
+
         assert not any(map(lambda x: x.mode in ['A', 'D'], hunks)), \
             "This function can only be used to add changes to existing files."
 
@@ -502,7 +550,11 @@ class Ownership:
 
         self.history[commit_hash] = OwnershipHistory(commit_hash, copy.deepcopy(self.changes), abs_changes)
 
-    def _apply_conflict_resolution(self, author: str, hunk: FileSection, date: datetime.datetime):
+    def _apply_conflict_resolution(self, author: str, hunk: FileSection, date: datetime.datetime) -> None:
+        '''
+        Apply the changes made to the file in the current conflict resolving commit.
+        Mura transfers the ownership of the lines to the author of the conflict resolving commit.
+        '''
         split = hunk.content.splitlines(keepends=True)
         init_line_count = len(split)
         if split:
@@ -533,6 +585,7 @@ class Ownership:
 def get_file_changes(commit_range: CommitRange, commit_hash: str, repo: Repo) -> Dict[Path, Change]:
     """
     Get the ownership of each file in the commit with the hash <commit_hash>
+
     :param commit_hash: The hash of the commit to analyze
     :param repo: The repository to analyze
     :return: A dictionary mapping each file name to the lines changed by the author of the commit
@@ -544,8 +597,6 @@ def get_file_changes(commit_range: CommitRange, commit_hash: str, repo: Repo) ->
             # This is a merge commit
             result = repo.git.execute(['git', 'show', commit_hash, "--cc", "--unified=0"])
             assert isinstance(result, str)
-            matches = HUNK_CONFLICT_PATTERN.findall(result)  # TODO
-            a_names = CONFLICT_A_NAME.findall(result)  # TODO
             b_names = CONFLICT_B_NAME.findall(result)
             ret = {}
             for i in range(len(b_names)):
@@ -630,6 +681,9 @@ def get_file_changes(commit_range: CommitRange, commit_hash: str, repo: Repo) ->
 
 
 def calculate_percentage(contributors: List[Contributor], result: AnalysisResult) -> Percentage:
+    '''
+    Calculates the percentage of ownership for each contributor globally and per-file in the given result
+    '''
     ret: Dict[Path, List[Tuple[Contributor, float]]] = {}
     author_total: DefaultDict[Contributor, int] = defaultdict(lambda: 0)
     lines_total = 0
@@ -658,6 +712,7 @@ def calculate_percentage(contributors: List[Contributor], result: AnalysisResult
 def construct_unmerged_tree(unmerged_commits: Set[str], all_commits: Set[str], repo: Repo) -> Dict[str, List[str]]:
     """
     Construct a tree of all unmerged commits
+
     :param unmerged_commits: A set of all unmerged commits
     :param all_commits: A list of all commits in the repository
     :param repo: The repository to analyze
@@ -677,7 +732,7 @@ def construct_unmerged_tree(unmerged_commits: Set[str], all_commits: Set[str], r
             if curr in visited:
                 continue
             visited.add(curr)
-            for parent in repo.commit(curr).parents:  # This can be from repo directly
+            for parent in repo.commit(curr).parents:
                 if parent.hexsha in all_commits:
                     ret[parent.hexsha].append(curr)
                     if parent.hexsha in unmerged_commits:
@@ -686,6 +741,9 @@ def construct_unmerged_tree(unmerged_commits: Set[str], all_commits: Set[str], r
 
 
 def create_path(parent: str, tree: Dict[str, List[str]], repo: Repo, paths: List[str]) -> List[str]:
+    '''
+    Create a path from a commit to the root of the tree
+    '''
     ret: List[str] = []
     children = tree[parent]
     for child in children:

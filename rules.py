@@ -1,3 +1,7 @@
+'''
+File responsible for parsing rule definitions and consequtive evaluation
+'''
+
 from __future__ import annotations
 
 import abc
@@ -21,7 +25,11 @@ class RuleOp(Enum):
     LESS_THAN_OR_EQUALS = 5
 
 
-class Rule:
+class Rule(abc.ABC):
+    '''
+    Abstract class representing a rule. Rules are parsed from the configuration file.
+    '''
+
     def __init__(self, contributor: str, amount: str) -> None:
         self.contributor_name = contributor
         self.contributor_instance: Optional[Contributor] = None
@@ -78,6 +86,10 @@ class Rule:
 
 
 class FileRule(Rule):
+    '''
+    Rule that matches files in a directory.
+    '''
+
     def __init__(self, contributor: str, directory: str, file: str, amount: str, constraint: Optional[str] = None):
         super().__init__(contributor, amount)
         self.constraint = constraint
@@ -114,6 +126,10 @@ class FileRule(Rule):
 
 
 class RemoteRule(Rule):
+    '''
+    Rule that matches remote objects (issues or pull requests).
+    '''
+
     def __init__(self, contributor: str, remote_object: str, amount: str):
         super().__init__(contributor, amount)
         self.remote_object = remote_object
@@ -144,10 +160,10 @@ class RuleCollection:
     def __init__(self, rules: List[Rule]):
         self.rules = rules
 
-    def matches_files(self, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]]) -> Dict[
-        Contributor, List[FileRule]]:
+    def matches_files(self, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]]) \
+            -> Dict[Contributor, List[FileRule]]:
         """
-        Matches the rule_data against the ownership, returning a dictionary of contributors and the rule_data that they violate.
+        Matches the local rules against the ownership of files in a repository.
 
         :param ownership: The ownership to match against
         :return: A dictionary of contributors and the rule_data that they violate
@@ -169,7 +185,13 @@ class RuleCollection:
                             ret[actor].append(rule)
         return ret
 
-    def matches_remote(self, contributors: List[Contributor], project: RemoteRepository) -> Dict[Contributor, List[RemoteRule]]:
+    def matches_remote(self, contributors: List[Contributor], project: RemoteRepository) \
+            -> Dict[Contributor, List[RemoteRule]]:
+        """
+        Matches the rules defined for remote repository contribution.
+
+        :return: A dictionary of contributors and the rule_data that they violate
+        """
         ret: Dict[Contributor, List[RemoteRule]] = {}
         for rule in [r for r in self.rules if isinstance(r, RemoteRule)]:
             if rule.all_contributors:
@@ -179,7 +201,7 @@ class RuleCollection:
                             ret[actor] = []
                         ret[actor].append(rule)
             else:
-                actor = next((c for c in contributors if c == rule.contributor_name), None)
+                actor = next((c for c in contributors if c == rule.contributor_name), Contributor.unknown())
                 rule.contributor_instance = actor
                 assert actor is not None
                 if not rule.matches(project=project, owner=actor):

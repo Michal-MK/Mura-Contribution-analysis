@@ -1,3 +1,6 @@
+'''
+File holding all the utility functions and classes.
+'''
 from __future__ import annotations
 
 import os
@@ -14,10 +17,15 @@ if TYPE_CHECKING:
     from configuration import Configuration
     from history_analyzer import CommitRange
 
+# Adapted from https://gist.github.com/onero/2983bf817fc88b7fe7beb6041e1c5b0a
 ignore_list = os.path.join(Path(__file__).parent, "data", "ignore-list.txt")
 
 
 class FileGroup:
+    '''
+    FileGroup is represented as a collection of files within a directory.
+    '''
+
     def __init__(self, name: str, files: List[Path]):
         self.name = name
         self.files = files
@@ -41,13 +49,12 @@ def first_commit(commit: Commit) -> Commit:
     return commit
 
 
-def commit_summary(commit: Commit) -> None:
-    print(f"There are total of {commit.stats.total['files']} changed files")
-    print(f"Author: {commit.author}")
-    print(f"Message: {commit.message}")
-
-
 def stats_for_contributor(contributor: Contributor, commit_range: CommitRange) -> Tuple[int, int]:
+    '''
+    Returns the number of insertions and deletions for a contributor in a commit range.
+    :param contributor: The contributor to get the stats for, all aliases are considered.
+    :param commit_range: The commit range to get the stats for.
+    '''
     insertions = 0
     deletions = 0
     for commit_sha in commit_range:
@@ -59,6 +66,12 @@ def stats_for_contributor(contributor: Contributor, commit_range: CommitRange) -
 
 
 class FlaggedFiles:
+    '''
+    FlaggedFiles represent a collection of files that have been flagged as added, removed, modified or deleted by Git.
+    The stats are cumulative, meaning that if a file is flagged as added in one commit and modified in another, it will
+    be counted as both added and modified.
+    '''
+
     def __init__(self):
         self.counts = {"A": 0, "R": 0, "D": 0, "M": 0}
         self.paths = {"A": [], "R": [], "D": [], "M": []}
@@ -69,6 +82,12 @@ class FlaggedFiles:
 
 
 def get_files_with_flags(commit: Commit) -> Dict[str, List[Union[int, List[Any]]]]:
+    '''
+    Get all files that have been flagged as added, removed, modified or deleted by Git.
+    :param commit:
+    :return: A dictionary with the flags as keys and a list of the number of files and the paths of the files as values.
+    '''
+    # TODO Refactor this so that get_files_with_flags and FlaggedFiles.update are merged into one function
     flags = ["A", "R", "D", "M"]
     result: Dict[str, List[Union[int, List[Any]]]] = {flag: [0, []] for flag in flags}
     parent: Optional[Commit] = None
@@ -86,8 +105,8 @@ def get_files_with_flags(commit: Commit) -> Dict[str, List[Union[int, List[Any]]
     return result
 
 
-def get_flagged_files_by_contributor(commit_range: CommitRange, contributors: List[Contributor]) -> Dict[
-    Contributor, FlaggedFiles]:
+def get_flagged_files_by_contributor(commit_range: CommitRange, contributors: List[Contributor]) \
+        -> Dict[Contributor, FlaggedFiles]:
     result = {}
     for commit_hexsha in commit_range:
         commit = commit_range.commit(commit_hexsha)
@@ -114,8 +133,7 @@ def try_checkout(repo: Repo, commit_hash: str, force: bool = False) -> None:
 
 def _ignored_files() -> List[str]:
     """
-    Get a list of all ignored files
-    :return: A list of all ignored files
+    Get a list of all ignored files, for this purpose a general list matching most common generated files is used.
     """
     ret: List[str] = []
     with open(ignore_list, 'r') as f:
@@ -129,8 +147,8 @@ def _ignored_files() -> List[str]:
 
 def get_tracked_files(project_root: Union[Path, Repo], verbose=False) -> List[FileGroup]:
     """
-    Find all files that are related, relative to the project root
-    :
+    Find all files that are version controlled, relative to the project root
+
     :param project_root: The root directory of the project
     :return: A dictionary of all directories and their files which are related to each other
     """
@@ -168,6 +186,7 @@ def get_tracked_files(project_root: Union[Path, Repo], verbose=False) -> List[Fi
 def is_ignored(file: Path) -> bool:
     """
     Check if a file is ignored
+
     :param file: The file to check
     :return: True if the file is ignored, False otherwise
     """
@@ -208,6 +227,12 @@ def posix_repo_p(file_name: str, repo: Repo) -> str:
 
 
 def repo_p(file_name: str, repo: Repo) -> Path:
+    '''
+    Converts absolute path to relative path to repo root and back based on the file_name content
+
+    :param file_name: Absolute or repo-relative path to a file
+    :param repo: The repository instance
+    '''
     repo_dir = repo.working_dir
     assert repo_dir is not None
     if file_name.startswith(str(repo_dir)):
@@ -216,6 +241,11 @@ def repo_p(file_name: str, repo: Repo) -> Path:
 
 
 class Contributor:
+    '''
+    A contributor is a person who has contributed to the project.
+    They are identified by their name and email address as well as a list of aliases.
+    Contributors are directly comparable to each other, string instance and Actor instances used by GitPython.
+    '''
     def __init__(self, name: str, email: str):
         self.name = name
         self.email = email
@@ -256,7 +286,10 @@ class Contributor:
 
 
 class Percentage:
-    # Tuple[Dict[str, List[Tuple[str, float]]], Dict[str, float]]:
+    '''
+    Percentage holds percentage contribution to a file in the range [0, 1] meaning 0% to 100%.
+    Global contribution is the contribution to the whole project. It acts as a cache of
+    '''
     def __init__(self, file_per_contributor: Dict[Path, List[Tuple[Contributor, float]]],
                  global_contribution: DefaultDict[Contributor, float]):
         self.file_per_contributor = file_per_contributor
@@ -266,9 +299,7 @@ class Percentage:
 def get_contributors(config: 'Configuration', commit_range: CommitRange, match_on_name=True,
                      match_on_email=True) -> List[Contributor]:
     """
-    Get a list of all contributors
-
-    :return: A list of all contributors
+    Get a list of all contributors in a commit range. Based on the configuration the returned list may be anonymized.
     """
     contributors: Set[Contributor] = set()
     commits = [commit_range.commit(x) for x in commit_range]
@@ -331,6 +362,9 @@ def get_contributors(config: 'Configuration', commit_range: CommitRange, match_o
 
 
 def find_contributor(contributors: List[Contributor], author: str) -> Optional[Contributor]:
+    '''
+    Helper function to find a contributor by their name.
+    '''
     for contributor in contributors:
         if author == contributor.name or author == contributor.email:
             return contributor
@@ -343,6 +377,11 @@ def find_contributor(contributors: List[Contributor], author: str) -> Optional[C
 
 
 class ContributionDistribution:
+    '''
+    ContributionDistribution holds information about a file and its contribution percentage.
+    It is just a simple data class to hold the information and provide a __str__ method overload compared to a tuple,
+    which it originally was.
+    '''
     def __init__(self, file: Path, percentage: float, repo: Optional[Repo] = None):
         self.file = file
         self.percentage = percentage
@@ -365,8 +404,4 @@ def compute_file_ownership(percentage: Percentage, config: Configuration, repo: 
         for contributor, contrib_percent in percentages:
             if contrib_percent > config.full_ownership_min_threshold:
                 ret[contributor].append(ContributionDistribution(file, 1, repo))
-            # elif contrib_percent < config.ownership_min_threshold:
-            #     continue
-            # else:
-            #     ret[contributor].append(ContributionDistribution(file, contrib_percent))
     return ret

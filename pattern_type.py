@@ -1,6 +1,9 @@
+'''
+This file contains the PatternType for syntactic analysis.
+'''
 from enum import Enum
 
 
 class PatternType(Enum):
-    Literal = 1
-    Regex = 2
+    LITERAL = 1
+    REGEX = 2

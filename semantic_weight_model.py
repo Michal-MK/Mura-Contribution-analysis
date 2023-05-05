@@ -1,5 +1,9 @@
+'''
+File used for the SemanticWeightModel class, which is used to store the weights for semantic analysis.
+'''
+
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 from fs_access import parse_model_content
 

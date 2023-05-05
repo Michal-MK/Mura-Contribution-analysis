@@ -1,3 +1,7 @@
+'''
+File responsible for analyzing the semantics of a programming language.
+'''
+
 import subprocess
 import time
 from pathlib import Path
@@ -14,6 +18,11 @@ SEMANTIC_ANALYZERS: Dict[str, 'LangSemantics'] = {}
 
 
 class LangElement:
+    '''
+    Language element, such as a class, function, field, property, etc.
+    A generic element of an AST tree structure.
+    '''
+
     def __init__(self, kind: str, parent: Optional['LangElement'], children: List['LangElement']) -> None:
         self.kind = kind
         self.parent = parent
@@ -50,6 +59,10 @@ class LangElement:
         return self.start <= start and self.end >= end
 
     def compute_weight(self, weight_model: SemanticWeightModel) -> float:
+        '''
+        Computes the weight of this language element according to the weight model.
+        '''
+
         total_length_multiplier = 1.0
         class_count_multiplier = 1.0
         function_count_multiplier = 1.0
@@ -107,6 +120,11 @@ class LangSemantics:
         self.tool = tool_executable
 
     def analyze(self, files: List[Path]) -> List[Tuple[Path, SemanticWeightModel, LangElement]]:
+        '''
+        Core function for the semantic analysis, it launches the analyzer for the given file group.
+        The output is a list of of tuples for each file in the group.
+        Each tuple contains the file path, the semantic weight model and the root of the AST tree for the file.
+        '''
         results: List[Tuple[Path, SemanticWeightModel, LangElement]] = []
 
         file_names = [str(file) for file in files]
@@ -166,7 +184,13 @@ def compute_semantic_weight(file: Path) -> Tuple[Path, SemanticWeightModel, 'Lan
     return semantics.analyze([file])[0]
 
 
-def compute_semantic_weight_grouped(config: Configuration, file_group: FileGroup) -> List[Tuple[Path, SemanticWeightModel, 'LangElement']]:
+def compute_semantic_weight_grouped(config: Configuration, file_group: FileGroup) \
+        -> List[Tuple[Path, SemanticWeightModel, 'LangElement']]:
+    '''
+    Computes the semantic weight for a group of files.
+    Individual files are grouped by extension per folder to speed up the process.
+    '''
+
     files = [file.absolute() for file in file_group.files]
 
     files_by_extension: Dict[str, List[Path]] = {}
@@ -200,6 +224,10 @@ def compute_semantic_weight_grouped(config: Configuration, file_group: FileGroup
 
 def compute_semantic_weight_result(config: Configuration, file_groups: List[FileGroup], verbose=False) \
         -> List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]]:
+    '''
+    Driver function for the semantic analysis.
+    '''
+
     total_groups = len(file_groups)
     counter = 1
     start = time.time()
@@ -222,6 +250,10 @@ def has_semantic_parser(file: Path) -> bool:
 
 
 def load_semantic_parser(file: Path) -> Optional[LangSemantics]:
+    '''
+    Parses the model for the semantic parser together with the executable.
+    '''
+
     extension = file.suffix.lstrip('.')
 
     if not extension and file.name.startswith('.'):
