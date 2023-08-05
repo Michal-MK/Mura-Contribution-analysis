@@ -6,7 +6,7 @@
 # <amount> is the expected number of matches the contributor should have.
 # <constraint> is an optional constraint, if the constraint is not met, the rule is ignored. Currently not implemented!
 * "*/" ".*Controller.*\.java" >=1
-* "*/" ".*Test.*\.java" >=1 | $DIR_TREE=="*/src/test/java" && $OWN(*/src/) != $OWNER
+* "*/" ".*Test.*\.java" >=1
 * "*/" "pom\.xml" >=1
 # 'r' prefix is for rules for remote repositories
 # <contributor> is the name of the contributor or * for all contributors.

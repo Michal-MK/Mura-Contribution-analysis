@@ -26,6 +26,7 @@ PULL_REQUESTS = '🔄'
 PERCENTAGE = '📊'
 WEIGHT = '🏆'
 SEMANTICS = '📚'
+FILE_STATS = '📈'
 SYNTAX = '📖'
 BLANKS_COMMENTS = '⬛️'
 

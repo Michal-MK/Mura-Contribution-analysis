@@ -45,7 +45,7 @@ def validate_repository(repository_path: str, config: 'Configuration') -> Repo:
         repo = Repo(path)
         print(f"{SUCCESS} Repository path '{path}' points to a repository")
 
-        if config.ignore_remote_repo:
+        if config.ignore_remote_repo or config.prescan_mode:
             print(f"{INFO} Skipping remote repositories as 'config.ignore_remote_repo = True'")
             return repo
 

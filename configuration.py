@@ -52,6 +52,9 @@ class Configuration:
         self.ignore_whitespace_changes = True
         self.ignore_remote_repo = False
         self.blame_unseen = True
+        self.no_graphs = False
+        self.machine_preprocessed_output = False
+        self.prescan_mode = False
         self.anonymous_mode = False
         self.ignored_extensions: List[str] = []
         self.validated_analyzers: List[str] = []

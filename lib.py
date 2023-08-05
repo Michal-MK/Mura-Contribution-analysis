@@ -338,7 +338,7 @@ def get_contributors(config: 'Configuration', commit_range: CommitRange, match_o
                             matched = True
                             other.append_alias(it)
                             break
-            if it.normalized in other.aliases:
+            if it.normalized in other.aliases and not matched:
                 matched = True
                 other.append_alias(it)
                 break

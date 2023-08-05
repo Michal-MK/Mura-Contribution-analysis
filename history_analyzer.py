@@ -297,7 +297,7 @@ class CommitRange:
     def find_unmerged_branches(self, end_date: Optional[float] = None) -> List[Tuple[str, List[str]]]:
         """
         Find all unmerged branches in the repository in the commit range dates,
-        The end date many be overriden by the optional parameter end_date
+        The end date may be overriden by the optional parameter end_date
 
         :return: A list of all unmerged branches
         """
@@ -347,7 +347,7 @@ class CommitRange:
 
         return ret
 
-    def unmerged_commits_info(self, repository: Repo, config: Configuration, contributors: List[Contributor]) -> None:
+    def display_unmerged_commits_info(self, repository: Repo, config: Configuration, contributors: List[Contributor]) -> None:
         '''
         Provide a visual representation of the unmerged branches in the repository
         '''

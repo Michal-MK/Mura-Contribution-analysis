@@ -23,7 +23,10 @@ from sonarqube.utils.exceptions import AuthError  # type: ignore
 
 import configuration
 import file_analyzer
+import fs_access
 import semantic_analysis
+from analyzers.plots.commit_ditribution import plot_commits
+from analyzers.dir_tree import build_tree, print_tree
 from configuration import Configuration, start_sonar
 from file_analyzer import FileWeight
 from history_analyzer import AnalysisResult, calculate_percentage, CommitRange
@@ -41,38 +44,6 @@ from collections import defaultdict
 from uni_chars import *
 
 ContributorWeight = Dict[Contributor, float]
-GlobalRuleWeightMultiplier = Dict[Contributor, float]
-
-
-def build_tree(triples: List[Tuple[Path, float, Contributor]]) -> Dict[Any, Any]:
-    tree: Dict[Any, Any] = {}
-    for triple in triples:
-        current = tree
-        for part in triple[0].parts:
-            if part not in current:
-                current[part] = {}
-            current = current[part]
-        current[triple[2]] = current.get(triple[2], 0) + triple[1]
-    return tree
-
-
-def calculate_ownership(tree, ownership_cache=None) -> Dict[Contributor, float]:
-    if ownership_cache is None:
-        ownership_cache = {}
-    if all(isinstance(value, float) for value in tree.values()):
-        return tree
-    ownership: Dict[Contributor, float] = defaultdict(float)
-    count = 0
-    for value in tree.values():
-        if isinstance(value, dict):
-            sub_ownership = calculate_ownership(value, ownership_cache)
-            for owner, percentage_value in sub_ownership.items():
-                ownership[owner] += percentage_value
-            count += 1
-    for owner in ownership:
-        ownership[owner] /= count
-    ownership_cache[id(tree)] = ownership
-    return ownership
 
 
 def get_owner(ownership: Dict[Contributor, List[ContributionDistribution]], file: Path) -> Optional[Contributor]:
@@ -86,95 +57,23 @@ def get_owner(ownership: Dict[Contributor, List[ContributionDistribution]], file
     return None
 
 
-def print_tree(tree: Dict[Any, Any], level=0, prefix='', ownership_cache=Optional[Dict[Contributor, float]]) -> None:
-    '''
-    Prints a tree structure of the repository
-    '''
-    if ownership_cache is None:
-        ownership_cache = {}
-    for i, (name, value) in enumerate(tree.items()):
-        if i == len(tree) - 1:
-            connector = '└── '
-            new_prefix = prefix + '    '
-        else:
-            connector = '├── '
-            new_prefix = prefix + '│   '
-        if isinstance(value, dict):
-            if all(isinstance(v, float) for v in value.values()):
-                owners_str = ', '.join(
-                    [f'{owner.name}: {value * 100:.0f}%' for owner, value in value.items() if owner.name != '?'])
-                print(f'{prefix}{connector}{name} {CONTRIBUTOR} [{owners_str}]')
-            else:
-                sub_ownerships = [calculate_ownership(v, ownership_cache) for v in value.values() if
-                                  isinstance(v, dict)]
-                if len(sub_ownerships) > 0 \
-                        and all(sub_ownerships[0] == sub_ownership for sub_ownership in sub_ownerships):
-                    print(f'{prefix}{connector}{name}')
-                else:
-                    owners_str = ', '.join([f'{owner.name}: {value * 100:.0f}%' for owner, value in
-                                            calculate_ownership(value, ownership_cache).items() if owner.name != '?'])
-                    print(f'{prefix}{connector}{name} {CONTRIBUTOR} [{owners_str}]')
-                print_tree(value, level + 1, new_prefix, ownership_cache)
-
-
-def plot_commits(commits: List[str], commit_range: CommitRange, contributors: List[Contributor],
-                 force_x_axis_dense_labels=False, output_path: Optional[Path] = None) -> None:
-    '''
-    Plotting function for commit distribution
-    '''
-
-    commit_data = defaultdict(list)
-    min_date = datetime.max.replace(tzinfo=timezone.utc)
-    max_date = datetime.min.replace(tzinfo=timezone.utc)
-
-    for commit in commits:
-        commit_obj = commit_range.commit(commit)
-        for contributor in contributors:
-            if contributor == commit_obj.author:
-                committed_date = commit_obj.committed_datetime
-                commit_data[contributor.name].append(date2num(committed_date))
-                min_date = min(min_date, committed_date)
-                max_date = max(max_date, committed_date)
-                break
-
-    plt.figure(figsize=(12, 6))
-
-    for name, dates in commit_data.items():
-        plt.plot_date(sorted(dates), range(len(dates)), label=name)
-    plt.legend()
-    plt.xticks(rotation=45)
-
-    delta = timedelta(days=1)
-    dates = drange(min_date, max_date, delta)
-
-    if len(dates) <= 30 or force_x_axis_dense_labels:
-        plt.gca().xaxis.set_major_formatter(DateFormatter('%b %d'))
-        plt.gca().xaxis.set_tick_params(which='both', labelbottom=True)
-        plt.xticks(dates)
-    else:
-        print(f"{INFO} Skipping x-axis labels for all {len(dates)} dates to avoid cluttering the x-axis.")
-        print(f" - Set force_x_axis_labels to True to override this behavior.")
-
-    if output_path is not None:
-        plt.savefig(output_path)
-    else:
-        plt.show()
-
-
 '''
 Helper functions for output formatting
 '''
 
 
-def separator() -> None:
+def separator(section_end: bool = False) -> None:
     print()
     print("============================================")
+    if section_end:
+        print("  ", end="")
     print()
 
 
-def header(text: str) -> None:
+def header(text: str, machine_id: str = "") -> None:
+    if machine_id:
+        print(f" +{machine_id}")
     print(text)
-    print()
 
 
 def display_contributor_info(commit_range: CommitRange, config: Configuration) -> List[Contributor]:
@@ -182,8 +81,9 @@ def display_contributor_info(commit_range: CommitRange, config: Configuration) -
     Driver function for contributor overview
     '''
 
+    header(f"{CONTRIBUTOR} Contributors:", machine_id="contributors")
+
     contributors = get_contributors(config, commit_range=commit_range)
-    header(f"{CONTRIBUTOR} Contributors:")
 
     for contrib in contributors:
         if contrib.name == '?' and contrib.email == '?':
@@ -194,18 +94,19 @@ def display_contributor_info(commit_range: CommitRange, config: Configuration) -
     return contributors
 
 
-def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contributor]) \
+def display_commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contributor], config: Configuration) \
         -> Tuple[Dict[Contributor, int], List[Tuple[Contributor, int, int]]]:
     '''
     Driver function for commit overview
     '''
 
-    header(f"{COMMIT} Total commits: {len(commit_range.compute_path())}")
+    header(f"{COMMIT} Total commits: {len(commit_range.compute_path())}", machine_id="commits")
 
     commit_distribution: Dict[Contributor, int] = defaultdict(lambda: 0)
 
     for commit in commit_range:
-        author = commit_range.commit(commit).author.name
+        raw_commit = commit_range.commit(commit)
+        author = raw_commit.author.name
         if author is None:
             continue
         contributor = find_contributor(contributors, author)
@@ -215,7 +116,10 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
         commit_distribution[contributor] += 1
         split = repo.commit(commit).message.splitlines()
         message = split[0] if len(split) > 0 else ''
-        print(f'Commit: {commit} - Msg: "{message}" by {CONTRIBUTOR} {contributor.name}')  # type: ignore
+        print(f'Commit: {commit} - Msg: "{message}" - Date: `{raw_commit.committed_datetime}` by {CONTRIBUTOR} {contributor.name}')  # type: ignore
+
+    if config.prescan_mode:
+        return commit_distribution, []
 
     print()
     header(f"{COMMIT} Commits per contributor:")
@@ -234,6 +138,7 @@ def commit_info(commit_range: CommitRange, repo: Repo, contributors: List[Contri
 
 
 def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int, int]],
+                              config: Configuration,
                               output_path: Optional[Path] = None) -> Any:
     '''
     Plotting function for insertions and deletions
@@ -262,16 +167,18 @@ def insertions_deletions_info(insertions_deletions: List[Tuple[Contributor, int,
     if output_path is not None:
         plt.savefig(output_path)
     else:
-        plt.show()
+        if (not config.no_graphs):
+            plt.show()
 
 
-def percentage_info(analysis_res: AnalysisResult, contributors: List[Contributor], config: Configuration, repo: Repo) \
+def display_percentage_info(analysis_res: AnalysisResult, contributors: List[Contributor], config: Configuration,
+                            repo: Repo) \
         -> Tuple[Percentage, Dict[Contributor, List[ContributionDistribution]]]:
     '''
     Driver code for calculating and displaying percentage information.
     '''
 
-    header(f'{PERCENTAGE} Percentage of tracked files:')
+    header(f'{PERCENTAGE} Percentage of tracked files:', machine_id="percentage")
 
     percentage = calculate_percentage(contributors, analysis_res)
 
@@ -298,7 +205,7 @@ def display_dir_tree(percentage: Percentage, repo: Repo):
     Driver code for ownership tree rendering
     '''
 
-    header(f"{DIRECTORY_TREE} Dir Tree with ownership:")
+    header(f"{DIRECTORY_TREE} Dir Tree with ownership:", machine_id="dir_tree")
 
     triples = []
 
@@ -310,14 +217,14 @@ def display_dir_tree(percentage: Percentage, repo: Repo):
     print_tree(tree)
 
 
-def rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]],
-              contributors: List[Contributor], remote_project: RemoteRepository) -> GlobalRuleWeightMultiplier:
+def display_rule_info(config: Configuration, repo: Repo, ownership: Dict[Contributor, List[ContributionDistribution]],
+                      contributors: List[Contributor], remote_project: RemoteRepository) -> Dict[Contributor, float]:
     '''
     Driver code for Rule based analysis
     '''
-    header(f"{RULES} Rules: ")
+    header(f"{RULES} Rules: ", machine_id="rules")
 
-    ret: GlobalRuleWeightMultiplier = defaultdict(lambda: 1.0)
+    ret: Dict[Contributor, float] = defaultdict(lambda: 1.0)
 
     for rule in config.parsed_rules.rules:
         print(rule)
@@ -500,14 +407,14 @@ def start_sonar_analysis(config: Configuration, repository_path: str) \
     return project_key, container
 
 
-def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[ContributionDistribution]],
-                      local_syntax: Dict[Path, FileWeight], repo: Repo, file_maturity_score: Dict[Path, float],
-                      n_extreme_files: int = 5) -> ContributorWeight:
+def display_local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[ContributionDistribution]],
+                              local_syntax: Dict[Path, FileWeight], repo: Repo, file_maturity_score: Dict[Path, float],
+                              n_extreme_files: int = 5) -> ContributorWeight:
     '''
     Driver function for local syntax analysis.
     '''
 
-    header(f"{SYNTAX} Local Syntax Analysis")
+    header(f"{SYNTAX} Local Syntax Analysis", machine_id="local_syntax")
 
     assert n_extreme_files >= 0, "n_extreme_files must be non-negative."
 
@@ -566,14 +473,14 @@ def local_syntax_info(config: Configuration, ownership: Dict[Contributor, List[C
     return ret
 
 
-def sonar_info(config: Configuration, contributors: List[Contributor], repo: Repo,
-               file_ownership: Dict[Contributor, List[ContributionDistribution]],
-               project_key: Optional[str]) -> ContributorWeight:
+def display_sonar_info(config: Configuration, contributors: List[Contributor], repo: Repo,
+                       file_ownership: Dict[Contributor, List[ContributionDistribution]],
+                       project_key: Optional[str]) -> ContributorWeight:
     '''
     Driver function for SonarQube analysis.
     '''
 
-    header(f"{SYNTAX} Syntax + Semantics using SonarQube:")
+    header(f"{SYNTAX} Syntax + Semantics using SonarQube:", machine_id="sonarqube")
 
     if not config.use_sonarqube:
         print(f"{INFO} Syntax analysis uses SonarQube and 'config.use_sonarqube = False'. Skipping syntax analysis.")
@@ -739,16 +646,16 @@ def sonar_info(config: Configuration, contributors: List[Contributor], repo: Rep
     return ret
 
 
-def semantic_info(tracked_files: List[FileGroup],
-                  ownership: Dict[Contributor, List[ContributionDistribution]],
-                  semantics: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
-                  file_maturity_score: Dict[Path, float]) \
+def display_semantic_info(tracked_files: List[FileGroup],
+                          ownership: Dict[Contributor, List[ContributionDistribution]],
+                          semantics: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
+                          file_maturity_score: Dict[Path, float]) \
         -> ContributorWeight:
     '''
     Driver function for the semantic analysis.
     '''
 
-    header(f"{SEMANTICS} Semantics:")
+    header(f"{SEMANTICS} Semantics:", machine_id="semantics")
 
     contributor_weight: ContributorWeight = defaultdict(lambda: 0.0)
 
@@ -787,13 +694,13 @@ def semantic_info(tracked_files: List[FileGroup],
     return contributor_weight
 
 
-def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, contributors: List[Contributor]) \
+def display_remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, contributors: List[Contributor]) \
         -> Tuple[RemoteRepository, ContributorWeight]:
     '''
     Driver function for remote repository analysis.
     '''
 
-    header(f"{REMOTE_REPOSITORY} Remote repository management:")
+    header(f"{REMOTE_REPOSITORY} Remote repository management:", machine_id="remote")
 
     if config.ignore_remote_repo:
         print(f"{INFO} Skipping as 'config.ignore_remote_repo = True'")
@@ -886,11 +793,14 @@ def remote_info(commit_range: CommitRange, repo: Repo, config: Configuration, co
     return project, contributor_weight
 
 
-def file_statistics_info(commit_range: CommitRange, contributors: List[Contributor]) \
+def display_file_statistics_info(commit_range: CommitRange, contributors: List[Contributor]) \
         -> Dict[Contributor, FlaggedFiles]:
     '''
     Driver function for file statistics (Additions, Deletions, Modifications, Renames etc.)
     '''
+
+    header(f"{FILE_STATS} File statistics", machine_id='file_statistics')
+
     file_flags = get_flagged_files_by_contributor(commit_range, contributors)
     for contributor in contributors:
         if contributor.name == '?':
@@ -914,13 +824,15 @@ def get_all_comments(element: LangElement) -> List[LangElement]:
     return comments
 
 
-def constructs_info(tracked_files: List[FileGroup],
-                    ownership: Dict[Contributor, List[ContributionDistribution]],
-                    semantic_analysis_grouped_result: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]]):
+def display_constructs_info(tracked_files: List[FileGroup],
+                            ownership: Dict[Contributor, List[ContributionDistribution]],
+                            semantic_analysis_grouped_result: List[
+                                List[Tuple[Path, SemanticWeightModel, 'LangElement']]]):
     '''
     Driver function for language constructs analysis.
     '''
-    header(f"{SEMANTICS} Constructs:")
+
+    header(f"{SEMANTICS} Constructs:", machine_id="constructs")
 
     user_constructs: Dict[Contributor, Dict[str, int]] = defaultdict(lambda: defaultdict(lambda: 0))
     for i in range(len(tracked_files)):
@@ -944,15 +856,17 @@ def constructs_info(tracked_files: List[FileGroup],
             print(f"   => {key} - {value}")
 
 
-def lines_blanks_comments_info(repository: Repo,
-                               ownership: Dict[Contributor, List[ContributionDistribution]],
-                               semantic_analysis_res: List[List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
-                               tracked_files: List[FileGroup],
-                               n_extreme_files: int = 5):
+def display_lines_blanks_comments_info(repository: Repo,
+                                       ownership: Dict[Contributor, List[ContributionDistribution]],
+                                       semantic_analysis_res: List[
+                                           List[Tuple[Path, SemanticWeightModel, 'LangElement']]],
+                                       tracked_files: List[FileGroup],
+                                       n_extreme_files: int = 5):
     '''
     Driver function for lines, blanks and comments info
     '''
-    header(f"{BLANKS_COMMENTS} Blanks and comments:")
+
+    header(f"{BLANKS_COMMENTS} Blanks and comments:", machine_id="blanks_comments")
 
     assert n_extreme_files >= 0, 'n_extreme_files must be a non-negative number!'
 
@@ -1052,11 +966,12 @@ def estimate_hours(dates: List[datetime], max_commit_diff: int = 120, first_comm
     return round(hours)
 
 
-def hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Contributor, Tuple[int, int]]:
+def display_hour_estimates(contributors: List[Contributor], repository: Repo) -> Dict[Contributor, Tuple[int, int]]:
     '''
     Driver function for hour estimates
     '''
-    header(f"{TIME} Hour estimates:")
+
+    header(f"{TIME} Hour estimates:", machine_id="hours")
 
     commits = [x for x in repository.iter_commits()]
 
@@ -1114,18 +1029,20 @@ def gaussian_weights(config: Configuration, hour_estimate: float,
     return ret
 
 
-def summary_info(contributors: List[Contributor],
-                 sonar_weights: ContributorWeight,
-                 semantic_weights: ContributorWeight,
-                 local_syntax: ContributorWeight,
-                 repo_management_weights: ContributorWeight,
-                 global_rule_weight_multiplier: GlobalRuleWeightMultiplier,
-                 hours: ContributorWeight,
-                 file_history_multipliers: Dict[Path, float]) -> None:
+def display_summary_info(contributors: List[Contributor],
+                         sonar_weights: ContributorWeight,
+                         semantic_weights: ContributorWeight,
+                         local_syntax: ContributorWeight,
+                         repo_management_weights: ContributorWeight,
+                         global_rule_weight_multiplier: Dict[Contributor, float],
+                         hours: ContributorWeight,
+                         file_history_multipliers: Dict[Path, float]) -> None:
     '''
     Prints summary of all the weights and multipliers
     '''
     sums: Dict[Contributor, float] = defaultdict(lambda: 0.0)
+
+    header("Summary:", machine_id="summary")
 
     def print_section(section: ContributorWeight, add=True):
         if not section:
@@ -1199,34 +1116,45 @@ def main(arguments: argparse.Namespace) -> None:
 
     :param arguments: Arguments passed to the CLI, parsed by `argparse`.
     '''
-    import fs_access as file_system
-
     config = configuration.validate()
 
-    config.ignore_remote_repo = arguments.ignore_remote_repo
-    config.use_sonarqube = not arguments.no_sonarqube
-    config.sonarqube_persistent = not arguments.sq_no_persistence
-    config.sonarqube_keep_analysis_container = arguments.sq_keep_analysis_container
-    config.sonarqube_analysis_container_timeout_seconds = arguments.sq_container_exit_timeout
-    config.sonarqube_login = arguments.sq_login
-    config.sonarqube_password = arguments.sq_password
-    config.sonarqube_port = arguments.sq_port
+    if arguments.prescan_mode:
+        config.prescan_mode = arguments.prescan_mode
+    else:
+        config.ignore_remote_repo = arguments.ignore_remote_repo
+        config.use_sonarqube = not arguments.no_sonarqube
+        config.sonarqube_persistent = not arguments.sq_no_persistence
+        config.sonarqube_keep_analysis_container = arguments.sq_keep_analysis_container
+        config.sonarqube_analysis_container_timeout_seconds = arguments.sq_container_exit_timeout
+        config.sonarqube_login = arguments.sq_login
+        config.sonarqube_password = arguments.sq_password
+        config.sonarqube_port = arguments.sq_port
+        config.machine_preprocessed_output = arguments.machine_output
+        config.no_graphs = arguments.no_graphs
+        
 
-    config.ignore_whitespace_changes = arguments.ignore_whitespace_changes
-    config.ignored_extensions = arguments.ignored_extensions
+        config.ignore_whitespace_changes = arguments.ignore_whitespace_changes
+        config.ignored_extensions = arguments.ignored_extensions
 
-    config.post_validate()
+        config.post_validate()
 
     config.contributor_map = arguments.contributor_map
 
     repository_path = arguments.repo
 
-    repository = file_system.validate_repository(repository_path, config)
+    repository = fs_access.validate_repository(repository_path, config)
     commit_range = CommitRange(repository, arguments.head, arguments.root, verbose=True)
 
     config.anonymous_mode = arguments.anonymous_mode
 
     contributors = display_contributor_info(commit_range, config)
+    separator(section_end=True)
+
+    if config.prescan_mode:
+        _, _ = display_commit_info(commit_range, repository, contributors, config)
+        separator(section_end=True)
+        print(f"{INFO} Pre-scan only mode enabled. Exiting.")
+        return
 
     project_key, container = start_sonar_analysis(config, repository_path)
 
@@ -1237,49 +1165,62 @@ def main(arguments: argparse.Namespace) -> None:
 
     semantic_analysis_grouped_result = semantic_analysis.compute_semantic_weight_result(config, tracked_files,
                                                                                         verbose=True)
-    separator()
+    # separator()
     base_file_path = Path(arguments.file).parent if arguments.file else None
     if base_file_path:
         base_file_path = base_file_path / Path(arguments.file).stem
-    commit_distribution, insertions_deletions = commit_info(commit_range, repository, contributors)
-    insertions_deletions_info(insertions_deletions,
+    commit_distribution, insertions_deletions = display_commit_info(commit_range, repository, contributors, config)
+    insertions_deletions_info(insertions_deletions, config,
                               output_path=new_file(base_file_path, "_ins-del.png"))
-    separator()
-    plot_commits([x for x in commit_range][1:], commit_range, contributors,
+    separator(section_end=True)
+
+    plot_commits([x for x in commit_range][1:], commit_range, contributors, config,
                  output_path=new_file(base_file_path, "_commits.png"))
-    separator()
-    _ = file_statistics_info(commit_range, contributors)
-    separator()
-    percentage, ownership = percentage_info(history_analysis_result, contributors, config, repository)
-    separator()
+
+    _ = display_file_statistics_info(commit_range, contributors)
+    separator(section_end=True)
+
+    percentage, ownership = display_percentage_info(history_analysis_result, contributors, config, repository)
+    separator(section_end=True)
+
     display_dir_tree(percentage, repository)
-    separator()
+    separator(section_end=True)
 
-    lines_blanks_comments_info(repository, ownership, semantic_analysis_grouped_result, tracked_files,
-                               n_extreme_files=5)
-    separator()
-    commit_range.unmerged_commits_info(repository, config, contributors)
-    separator()
-    sonar_weights = sonar_info(config, contributors, repository, ownership, project_key)
-    separator()
-    local_syntax_weights = local_syntax_info(config, ownership, syntactic_analysis_result, repository,
+    display_lines_blanks_comments_info(repository, ownership, semantic_analysis_grouped_result, tracked_files,
+                                       n_extreme_files=5)
+    separator(section_end=True)
+
+    header("Unmerged commits", machine_id='unmerged_commits')
+    commit_range.display_unmerged_commits_info(repository, config, contributors)
+    separator(section_end=True)
+
+    sonar_weights = display_sonar_info(config, contributors, repository, ownership, project_key)
+    separator(section_end=True)
+
+    local_syntax_weights = display_local_syntax_info(config, ownership, syntactic_analysis_result, repository,
+                                                     file_history_multiplier)
+    separator(section_end=True)
+
+    semantic_weights = display_semantic_info(tracked_files, ownership, semantic_analysis_grouped_result,
                                              file_history_multiplier)
-    separator()
-    semantic_weights = semantic_info(tracked_files, ownership, semantic_analysis_grouped_result,
-                                     file_history_multiplier)
-    separator()
-    constructs_info(tracked_files, ownership, semantic_analysis_grouped_result)
-    separator()
-    hours = hour_estimates(contributors, repository)
+    separator(section_end=True)
 
+    display_constructs_info(tracked_files, ownership, semantic_analysis_grouped_result)
+    separator(section_end=True)
+
+    hours = display_hour_estimates(contributors, repository)
     hour_weights = gaussian_weights(config, arguments.hour_estimate_per_contributor, hours)
-    separator()
-    project, repo_management_weights = remote_info(commit_range, repository, config, contributors)
-    separator()
-    global_rule_weight_multiplier = rule_info(config, repository, ownership, contributors, project)
-    separator()
-    summary_info(contributors, sonar_weights, semantic_weights, local_syntax_weights, repo_management_weights,
-                 global_rule_weight_multiplier, hour_weights, file_history_multiplier)
+    separator(section_end=True)
+
+    project, repo_management_weights = display_remote_info(commit_range, repository, config, contributors)
+    separator(section_end=True)
+
+    global_rule_weight_multiplier = display_rule_info(config, repository, ownership, contributors, project)
+    separator(section_end=True)
+
+    display_summary_info(contributors, sonar_weights, semantic_weights, local_syntax_weights, repo_management_weights,
+                         global_rule_weight_multiplier, hour_weights, file_history_multiplier)
+    separator(section_end=True)
 
 
 if __name__ == '__main__':
@@ -1325,8 +1266,22 @@ if __name__ == '__main__':
                         help='Extensions to ignore during analysis')
     parser.add_argument('--ignore-remote-repo', action='store_true', default=False,
                         help='Ignore remote repository, in case of no internet connection or other reasons')
+    parser.add_argument('--machine-output', action='store_true', default=False,
+                        help='Machine readable output, '
+                             'places separators between sections and separators between items in a section')
+    parser.add_argument('--no-graphs', action='store_true', default=False,
+                        help='Do not display graphs.')
+    parser.add_argument('--prescan-mode', action='store_true', default=False,
+                        help='Display only pre-scan information, such as contributors and commit range. '
+                        'Used for further tuning of the configuration.')
+
+    print(" ".join(sys.argv[1:]))
 
     args = parser.parse_args()
+
+    # fix argparse contributor-map
+    if len(args.contributor_map) > 0:
+        args.contributor_map = args.contributor_map[0]
 
     if args.file != '':
         try:

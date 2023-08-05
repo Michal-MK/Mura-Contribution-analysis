@@ -1,3 +1,8 @@
+1.4.0
+- add support for CLI output to be further processed by external tools (preparation for new UI)
+- fix contributor map not parsed correctly from the `argparse` input
+- 
+
 1.3.4
 - fix unmerged branch detection incorrectly handling end date overrides (the parameter passed into the function)
 - fix tests for unmerged branches
