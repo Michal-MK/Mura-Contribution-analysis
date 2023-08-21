@@ -1,4 +1,7 @@
+import 'dart:math';
 import 'dart:ui';
+
+import 'package:flutter/widgets.dart';
 
 class MColors {
   static Color primary = Color(0xff0000dc);
@@ -17,6 +20,15 @@ class MColors {
   static Color sideMenuDrawerNeutralColor = gray5;
   static Color entryLeadingTextColor = primary;
   static Color tabBarSelectedLabelColor = primary;
+
+  // Random hsv color:
+  static Color randomColor() {
+    var rand = Random();
+    final int hue = (360 * rand.nextDouble()).toInt();
+    final double saturation = rand.nextDouble() * 0.5 + 0.5;
+    final double value = rand.nextDouble() * 0.5 + 0.5;
+    return HSVColor.fromAHSV(1.0, hue.toDouble(), saturation, value).toColor();
+  }
 }
 
 class LightTheme {

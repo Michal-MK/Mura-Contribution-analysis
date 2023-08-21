@@ -3,7 +3,7 @@ import 'package:flutter_ui/business/state/analysis_state.dart';
 import 'package:flutter_ui/ui/vertical_tabbarview.dart';
 import 'package:flutter_ui/views/configuration/host_page.dart';
 import 'package:flutter_ui/views/pages/about_page.dart';
-import 'package:flutter_ui/views/configuration/analysis_configuration.dart';
+import 'package:flutter_ui/views/pages/commits_page.dart';
 import 'package:flutter_ui/views/pages/text_dump_page.dart';
 import 'package:provider/provider.dart';
 
@@ -37,9 +37,13 @@ class _HomeContentState extends State<HomeContent> {
                 const AboutPage(),
                 const ConfigurationHostPage(),
                 for (int i = 0; i < 15; i++)
-                  TextDumpPage(
-                    content: value.sections.elementAtOrNull(i),
-                  ),
+                  if(i == 1) ...[
+                    CommitsPage(content: value.sections.elementAtOrNull(i))
+                  ] else ...[
+                    TextDumpPage(
+                      content: value.sections.elementAtOrNull(i),
+                    ),
+                  ]
               ],
             ),
           ),

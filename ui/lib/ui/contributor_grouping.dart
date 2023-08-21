@@ -4,7 +4,7 @@ import 'package:flutter_ui/business/state/analysis_state.dart';
 import 'package:flutter_ui/constants/colors.dart';
 import 'package:flutter_ui/constants/text_styles.dart';
 import 'package:flutter_ui/controllers/contributor_grouping_controller.dart';
-import 'package:flutter_ui/ui/m_contributor.dart';
+import 'package:flutter_ui/ui/contributor/m_contributor_grouping.dart';
 import 'package:flutter_ui/views/configuration/host_page.dart';
 import 'package:flutter_ui/views/home_content.dart';
 import 'package:provider/provider.dart';
@@ -210,19 +210,19 @@ class _MContributorGroupingState extends State<MContributorGrouping> {
           height: isHor ? null : 87 - 16,
           child: Material(
             color: Colors.transparent,
-            child: MContributor(contributorData: widget.controller.positions[i]![j], positionIndex: i, makePrimary: null),
+            child: MContributorGroupingEntry(contributorData: widget.controller.positions[i]![j], positionIndex: i, makePrimary: null),
           ),
         ),
         childWhenDragging: Opacity(
           opacity: 0.5,
           child: SizedBox(
             width: isHor ? sizedWidgetWidth : 220,
-            child: MContributor(contributorData: widget.controller.positions[i]![j], positionIndex: i, makePrimary: null),
+            child: MContributorGroupingEntry(contributorData: widget.controller.positions[i]![j], positionIndex: i, makePrimary: null),
           ),
         ),
         child: SizedBox(
           width: isHor ? null : 220,
-          child: MContributor(contributorData: widget.controller.positions[i]![j], positionIndex: i, makePrimary: makePrimary),
+          child: MContributorGroupingEntry(contributorData: widget.controller.positions[i]![j], positionIndex: i, makePrimary: makePrimary),
         ),
       ),
     );

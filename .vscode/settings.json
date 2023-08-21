@@ -9,7 +9,7 @@
         "**/web/**": true,
         "**/.dart_tool/**": true,
         "**/.idea/**": true,
-        // "**/build/**": true,
+        "**/build/**": true,
         "**/linux/**": true,
         "**/android/**": true,
         "**/analysis_options.yaml": true,
@@ -19,7 +19,7 @@
         // "**/windows/**": true,
         "**/.gitignore": true,
         "**/README.md": true,
-        // "**/fonts": true,
+        "**/fonts": true,
     },
     "cSpell.words": [
         "Comms",

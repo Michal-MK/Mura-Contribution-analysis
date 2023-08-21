@@ -1,5 +1,6 @@
 import 'package:fluent_ui/fluent_ui.dart' show ToggleSwitch;
 import 'package:flutter/material.dart';
+import 'package:flutter_ui/constants/colors.dart';
 import 'package:flutter_ui/constants/text_styles.dart';
 import 'package:flutter_ui/views/configuration/host_page.dart';
 
@@ -48,7 +49,20 @@ class _ToggleEntryState extends State<ToggleEntry> {
           style: TSMedium.italic.entry,
         ),
         trailing: SizedBox(
+          width: 60,
+          height: 36,
           child: ToggleSwitch(
+            thumb: Padding(
+              padding: const EdgeInsets.all(4.0),
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: widget.valueGetter() ? MColors.highlight : MColors.textDark,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
             checked: widget.valueGetter(),
             onChanged: (value) {
               setState(() {

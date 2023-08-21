@@ -6,13 +6,11 @@ import 'package:flutter_ui/ui/contributor_grouping.dart';
 
 class MContributor extends StatelessWidget {
   final ContributorData contributorData;
-  final int positionIndex;
-  final void Function(ContributorData contributorData, int positionIndex)? makePrimary;
+  final Widget? trailing;
 
   const MContributor({
     required this.contributorData,
-    required this.positionIndex,
-    required this.makePrimary,
+    this.trailing,
     super.key,
   });
 
@@ -60,13 +58,7 @@ class MContributor extends StatelessWidget {
                 ],
               ),
             ),
-            IconButton(
-              icon: Icon(
-                contributorData.isPrimary ? Icons.star : Icons.star_border,
-                color: contributorData.isPrimary ? MColors.highlight : MColors.gray1,
-              ),
-              onPressed: () => makePrimary?.call(contributorData, positionIndex),
-            ),
+            trailing ?? const SizedBox.shrink(),
           ],
         ),
       ),
